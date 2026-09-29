@@ -143,6 +143,10 @@ namespace KeibaDataCollector.Models
         public int Umaban { get; set; }
         public string KettoNum { get; set; }
 
+        /// <summary>算出時点の騎手コード。仕様書§15「騎手変更→再計算」の検知に使う
+        /// （Validatorが現在の騎手コードと突き合わせ、変わっていればブロックする）。</summary>
+        public string JockeyCode { get; set; }
+
         public FactorScores Factors { get; set; }
 
         /// <summary>Σ(値×重み)/Σ(重み)。算出できた（null出ない）ファクターのみ対象にする
