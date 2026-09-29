@@ -27,6 +27,58 @@ KeibaDataCollector.exe dashboard   # 監視ダッシュボード（仕様書§17
 同梱している。詳細な注意点（JV-Link Setup取得は無人実行不可、ダイアログ対策、ページキャッシュ、
 地方競馬のデータ欠損傾向等）は移植元リポジトリのREADMEに記載されている運用知見がそのまま当てはまる。
 
+## VPSへの初回デプロイ手順
+
+既存2システム（`keiba-race-result-auto-posting` / `horse-race-custom-builder`）と同じWindows VPS
+常駐アプリとしての運用を前提にしている。同じVPSに同居させる場合でも、タスク名（`KeibaDataCollector-*`）・
+インストール先ディレクトリとも既存2システムとは別なので、名前が衝突することはない。
+
+1. **前提ソフトウェアの導入**（VPS側で1回のみ）
+   - .NET SDK（`dotnet build`用。net48ターゲットのビルドにはWindows上の .NET SDK が必要）
+   - JV-Link（中央競馬）・UmaConn（地方競馬DATA、競馬最強の法則WEB）のクライアントソフトウェア。
+     いずれも契約済みの利用キーが必要（仕様書§0・§22、JRA-VAN・競馬最強の法則WEB双方の手続き）
+   - WordPress側で「アプリケーションパスワード」を発行しておく（`WordPressUser`/`WordPressAppPassword`
+     用。ユーザー本人のパスワードではなくアプリケーションパスワードを使うこと）
+
+2. **取得・ビルド**
+   ```powershell
+   git clone git@github.com:koppuchan/keiba-ai-data-system.git
+   cd keiba-ai-data-system\src\KeibaDataCollector
+   dotnet build -c Debug
+   ```
+
+3. **認証情報の設定**: `secrets.local.bat.example` を `secrets.local.bat` にコピーし、
+   `WordPressUser` / `WordPressAppPassword` / `JvLinkSoftwareId` を実値に置き換える。
+   **ASCII のみ・CRLF改行**を保つこと（`secrets.local.bat.example`冒頭のコメント参照。
+   UTF-8や LF 改行だと `cmd.exe` が正しく読めず、値が反映されないまま後続処理が失敗する）。
+   `secrets.local.bat` は `.gitignore` 対象のためコミットされない。
+
+4. **JV-Link / UmaConnの初期設定**（対話操作が必要、GUIダイアログが開く）
+   ```
+   KeibaDataCollector.exe setup
+   ```
+   利用キーはこれを実行したWindowsユーザーのレジストリに保存されるため、以降の
+   タスクスケジューラ登録（手順6）も同じユーザーで行うこと。
+
+5. **WordPressプラグインの導入**: [`wordpress-plugin/keiba-ai-digest/`](../wordpress-plugin/keiba-ai-digest/README.md)
+   の「インストール手順」を参照。導入直後は自動公開が既定でOFFになっている
+   （LicenseGateと同じフェイルクローズ方針）。
+
+6. **LicenseGateの状態確認**: JRA-VAN・競馬最強の法則WEB双方からの公開・商用利用許諾が
+   確認できるまで、WordPressへの自動公開は設計上ブロックされる。許諾確認が取れ次第、
+   `licensegate set-jra` / `licensegate set-local` で状態を更新する（詳細は後述）。
+
+7. **Task Schedulerへの登録**（本README「Windows Task Scheduler登録」参照）
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File .\register-scheduled-tasks.ps1
+   ```
+
+8. **動作確認**: `probe` → `backfill`（全履歴、手動・対話実行）→ `dbstats` の順に、
+   実際にデータが取得できているかを確認してから本番運用に入ることを推奨する。
+
+以降のアップデート（`git pull`→再ビルド→タスク再登録）は個別に手順を追わず、
+`deploy.ps1` を実行するだけでよい（停止→取得→ビルド→登録→再開を安全な順序でまとめて行う）。
+
 ## Windows Task Scheduler登録
 
 `register-scheduled-tasks.ps1` が、仕様書§12の自動更新スケジュール表に沿って以下をすべて登録する。
