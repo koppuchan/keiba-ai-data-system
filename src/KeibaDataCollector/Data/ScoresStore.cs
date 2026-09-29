@@ -208,6 +208,32 @@ namespace KeibaDataCollector.Data
                 });
         }
 
+        /// <summary>1レース分の全馬のスコアを取得する（取消・除外馬も含む。除外はContentGenerator/Validator
+        /// 側の責務）。Content Generator（仕様書§11）が狙い馬・穴馬・危険な人気馬をレース単位で
+        /// 判定する際の入力になる。</summary>
+        public List<AiIndexResult> GetRaceScores(DateTime raceDate, string trackCode, int raceNumber)
+        {
+            var result = new List<AiIndexResult>();
+            using (var cmd = new SQLiteCommand(@"
+                SELECT race_date, track_code, race_number, umaban, ketto_num,
+                       param_bias, param_pace, param_agari_q, param_jockey_roi, param_pedigree_fit, param_training_acc,
+                       ai_index, data_completeness, is_scratched, model_version, feature_version, data_cutoff_utc, computed_at_utc
+                FROM scores
+                WHERE race_date=@date AND track_code=@track AND race_number=@raceNum
+                ORDER BY umaban ASC;", _conn))
+            {
+                cmd.Parameters.AddWithValue("@date", raceDate.ToString("yyyy-MM-dd"));
+                cmd.Parameters.AddWithValue("@track", trackCode);
+                cmd.Parameters.AddWithValue("@raceNum", raceNumber);
+                using (var r = cmd.ExecuteReader())
+                {
+                    while (r.Read())
+                        result.Add(ReadRow(r));
+                }
+            }
+            return result;
+        }
+
         /// <summary>仕様書§9 AI指数TOP5。開催場（race_date×track_code）全体で、取消・除外馬を除き、
         /// ai_index降順で上位5頭を返す。同点はデータ充足率降順→馬番昇順でタイブレークする
         /// （馬番は決定的な最終タイブレーク。仕様書は「データ充足率・信頼度等」と例示するのみで
