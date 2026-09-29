@@ -75,6 +75,7 @@ namespace KeibaDataCollector.Services
                 RaceNumber = raceNumber,
                 Umaban = umaban,
                 KettoNum = input.KettoNum,
+                HorseName = input.HorseName,
                 JockeyCode = input.JockeyCode,
                 Factors = factors,
                 AiIndex = index,

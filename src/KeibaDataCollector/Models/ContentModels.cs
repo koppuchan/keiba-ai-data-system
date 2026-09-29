@@ -23,6 +23,7 @@ namespace KeibaDataCollector.Models
         public int RaceNumber { get; set; }
         public int Umaban { get; set; }
         public string KettoNum { get; set; }
+        public string HorseName { get; set; }
         public string JockeyCode { get; set; }
 
         public double? AiIndex { get; set; }
@@ -48,6 +49,7 @@ namespace KeibaDataCollector.Models
         public RaceKey Race { get; set; }
         public int Umaban { get; set; }
         public string KettoNum { get; set; }
+        public string HorseName { get; set; }
         public string Text { get; set; }
         public List<string> Reasons { get; set; } = new List<string>();
 
@@ -60,6 +62,10 @@ namespace KeibaDataCollector.Models
 
         /// <summary>生成時点の騎手コード。仕様書§15「騎手変更→再計算」の検知に使う。</summary>
         public string JockeyCodeAtGeneration { get; set; }
+
+        /// <summary>生成時点の馬名。仕様書§14「馬名・馬番・指数・レース番号をDBと照合」の
+        /// 馬名照合に使う（Issue #13）。</summary>
+        public string HorseNameAtGeneration { get; set; }
     }
 
     /// <summary>predictionsテーブルの1行に対応する永続化用レコード。PredictionStore.Insert専用の
@@ -72,6 +78,7 @@ namespace KeibaDataCollector.Models
         public int RaceNumber { get; set; }
         public int Umaban { get; set; }
         public string KettoNum { get; set; }
+        public string HorseName { get; set; }
         public string JockeyCode { get; set; }
         public string Category { get; set; }
         public string ContentText { get; set; }

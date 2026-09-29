@@ -111,6 +111,7 @@ namespace KeibaDataCollector.Services
                         var input = new FactorScoringInput
                         {
                             KettoNum = kettoNum,
+                            HorseName = Trim(se.Bamei),
                             TrackCode = raceKey.TrackCode,
                             Distance = raceInfo.Distance,
                             TrackSurfaceCode = raceInfo.TrackSurfaceCode,

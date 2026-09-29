@@ -18,10 +18,9 @@ namespace KeibaDataCollector.Services
     /// 判定に使う指数はScoresStore（scoreコマンドで既に永続化済み）から読むが、取消・除外状態は
     /// scoreコマンド実行時点のスナップショットの可能性があるため、このサービス自身が実行時に
     /// 当日のSEレコードを読み直して最新の状態で上書きする（仕様書§11「取消・騎手変更・馬場変更が
-    /// 未反映なら公開停止または再計算」のうち、取消・除外の再計算を担当。騎手変更・馬場変更の
-    /// 検知はscoresテーブルに算出時の騎手コード等を保持していないため対象外。Validator（Issue #6）
-    /// が公開直前にDBと再照合する形でカバーする想定）。
-    /// </summary>
+    /// 未反映なら公開停止または再計算」のうち、取消・除外の再計算を担当）。騎手変更・馬名不一致は
+    /// scoresテーブルに算出時の値（jockey_code/horse_name）が保存されているため、公開直前に
+    /// Validator（Issue #6・#9・#13）が現在値と再照合する形でカバーする。</summary>
     public class ContentGeneratorService
     {
         private readonly IRaceDataSource _source;
@@ -97,6 +96,7 @@ namespace KeibaDataCollector.Services
                     RaceNumber = raceNumber,
                     Umaban = s.Umaban,
                     KettoNum = s.KettoNum,
+                    HorseName = s.HorseName,
                     JockeyCode = s.JockeyCode,
                     AiIndex = s.AiIndex,
                     DataCompleteness = s.DataCompleteness,
@@ -126,9 +126,10 @@ namespace KeibaDataCollector.Services
             if (best == null) return null;
 
             var topFactor = TopFactor(best.Factors);
+            var horse = DisplayHorse(best);
             var text = topFactor == null
-                ? $"{race.RaceNumber}Rの狙い馬は{best.Umaban}番。AI指数{best.AiIndex:0.1}（データ充足率{best.DataCompleteness:P0}）で当レース内トップ評価。"
-                : $"{race.RaceNumber}Rの狙い馬は{best.Umaban}番。AI指数{best.AiIndex:0.1}（データ充足率{best.DataCompleteness:P0}）で当レース内トップ評価。{topFactor.Value.Name}が特に高評価（{topFactor.Value.Value:0.1}）。";
+                ? $"{race.RaceNumber}Rの狙い馬は{horse}。AI指数{best.AiIndex:0.1}（データ充足率{best.DataCompleteness:P0}）で当レース内トップ評価。"
+                : $"{race.RaceNumber}Rの狙い馬は{horse}。AI指数{best.AiIndex:0.1}（データ充足率{best.DataCompleteness:P0}）で当レース内トップ評価。{topFactor.Value.Name}が特に高評価（{topFactor.Value.Value:0.1}）。";
 
             return new GeneratedPick
             {
@@ -136,12 +137,14 @@ namespace KeibaDataCollector.Services
                 Race = race,
                 Umaban = best.Umaban,
                 KettoNum = best.KettoNum,
+                HorseName = best.HorseName,
                 Text = text,
                 Reasons = { $"ai_index={best.AiIndex:0.00}", $"data_completeness={best.DataCompleteness:0.00}" },
                 AiIndexAtGeneration = best.AiIndex,
                 NinkiAtGeneration = best.Ninki,
                 TanshoOddsAtGeneration = best.TanshoOdds,
                 JockeyCodeAtGeneration = best.JockeyCode,
+                HorseNameAtGeneration = best.HorseName,
             };
         }
 
@@ -163,7 +166,7 @@ namespace KeibaDataCollector.Services
             if (best == null) return null;
 
             var indexRank = rankedByIndex.IndexOf(best) + 1;
-            var text = $"{race.RaceNumber}Rの穴馬は{best.Umaban}番。{best.Ninki}番人気（単勝{best.TanshoOdds:0.0}倍）ながら、" +
+            var text = $"{race.RaceNumber}Rの穴馬は{DisplayHorse(best)}。{best.Ninki}番人気（単勝{best.TanshoOdds:0.0}倍）ながら、" +
                        $"AI指数は{best.AiIndex:0.1}で出走{fieldSize}頭中{indexRank}位相当。人気とのギャップに妙味あり。";
 
             return new GeneratedPick
@@ -172,12 +175,14 @@ namespace KeibaDataCollector.Services
                 Race = race,
                 Umaban = best.Umaban,
                 KettoNum = best.KettoNum,
+                HorseName = best.HorseName,
                 Text = text,
                 Reasons = { $"ninki={best.Ninki}", $"ai_index={best.AiIndex:0.00}", $"index_rank={indexRank}/{fieldSize}" },
                 AiIndexAtGeneration = best.AiIndex,
                 NinkiAtGeneration = best.Ninki,
                 TanshoOddsAtGeneration = best.TanshoOdds,
                 JockeyCodeAtGeneration = best.JockeyCode,
+                HorseNameAtGeneration = best.HorseName,
             };
         }
 
@@ -195,7 +200,7 @@ namespace KeibaDataCollector.Services
                 var concern = WeakestFactor(c.Factors, KikenFactorConcernThreshold);
                 if (concern == null) continue; // 明確な弱点が無ければ「危険」とは書かない。
 
-                var text = $"{race.RaceNumber}Rの{c.Ninki}番人気{c.Umaban}番は、{concern.Value.Name}が{concern.Value.Value:0.1}と平均を下回っており注意。" +
+                var text = $"{race.RaceNumber}Rの{c.Ninki}番人気{DisplayHorse(c)}は、{concern.Value.Name}が{concern.Value.Value:0.1}と平均を下回っており注意。" +
                            (c.AiIndex.HasValue ? $"AI指数は{c.AiIndex:0.1}。" : "AI指数は算出できていない。");
 
                 result.Add(new GeneratedPick
@@ -204,12 +209,14 @@ namespace KeibaDataCollector.Services
                     Race = race,
                     Umaban = c.Umaban,
                     KettoNum = c.KettoNum,
+                    HorseName = c.HorseName,
                     Text = text,
                     Reasons = { $"ninki={c.Ninki}", $"weak_factor={concern.Value.Name}={concern.Value.Value:0.00}" },
                     AiIndexAtGeneration = c.AiIndex,
                     NinkiAtGeneration = c.Ninki,
                     TanshoOddsAtGeneration = c.TanshoOdds,
                     JockeyCodeAtGeneration = c.JockeyCode,
+                    HorseNameAtGeneration = c.HorseName,
                 });
             }
             return result;
@@ -268,6 +275,11 @@ namespace KeibaDataCollector.Services
         }
 
         // ---- テンプレート補助 ----
+
+        /// <summary>「3番タニノフランケル」のように馬番＋馬名で表示する。馬名が未取得
+        /// （scoreコマンド未実行の古いデータ等）の場合は馬番のみにフォールバックする。</summary>
+        private static string DisplayHorse(PickCandidate c) =>
+            string.IsNullOrEmpty(c.HorseName) ? $"{c.Umaban}番" : $"{c.Umaban}番{c.HorseName}";
 
         private static (string Name, double Value)? TopFactor(FactorScores f)
         {
