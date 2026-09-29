@@ -7,6 +7,7 @@ using System.Text;
 using System.Threading.Tasks;
 using KeibaDataCollector.Models;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Converters;
 using Newtonsoft.Json.Serialization;
 
 namespace KeibaDataCollector.WordPress
@@ -30,6 +31,12 @@ namespace KeibaDataCollector.WordPress
         private static readonly JsonSerializerSettings CamelCaseSettings = new JsonSerializerSettings
         {
             ContractResolver = new CamelCasePropertyNamesContractResolver(),
+            // Converters無しだとenum（PickCategory/TrendStage等）が整数値でシリアライズされ、
+            // WordPress側（PHP）でjson_decodeしたときに0/1/2の意味を推測する必要が出てしまう。
+            // 列挙子名をそのまま文字列で送る（大文字小文字はプロパティ名のcamelCase化とは独立に
+            // 決められるため、predictionsテーブルの`category`列で既に使っているPascalCase表記
+            // （Category.ToString()の結果）とここでも揃えておく）。
+            Converters = { new StringEnumConverter() },
         };
 
         private readonly HttpClient _http;

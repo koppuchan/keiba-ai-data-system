@@ -17,6 +17,8 @@
 - `POST /wp-json/keiba-ai/v1/status`（要`edit_posts`権限、収集アプリのApplication Password想定）で
   監視ダッシュボード（仕様書§17）のスナップショットを受け取り、`GET`（要管理者権限）で参照可能
 - 設定 → Keiba AI Digest 画面から自動公開ON/OFFの切り替え、および最新の監視ダッシュボードを確認可能
+- `keiba_digest`投稿の個別ページで、AI指数TOP5・本日の傾向・狙い馬/穴馬/危険な人気馬を自動表示
+  （`the_content`フィルタで生成。`keiba-race-sync`と同じ方針でエディタ本文は使わない）
 
 ## 自動公開ON/OFFの既定値
 
@@ -42,3 +44,14 @@ Webから任意のバッチ実行を引き起こせる経路を増やすと、�
 `ai_index_top5` / `trend_morning` / `trend_live` / `trend_final` / `picks` は、`keiba-race-sync`の
 `race_card`等と同じ理由（WordPress REST APIのメタスキーマ検証がネストした任意配列を安定して扱えない
 ため）で、**camelCaseキーのJSON文字列**として保存する（`WordPressClient.cs`側もこの形式で送信する）。
+列挙型（`picks[].category`＝`Nerai`/`Ana`/`Kiken`、`trend_*.stage`＝`Morning`/`Live`/`Final`）は
+整数値ではなく列挙子名の文字列で送る（`WordPressClient.cs`の`CamelCaseSettings`に`StringEnumConverter`
+を追加済み）。
+
+## 表示側の既知の制約
+
+- **天候・馬場状態コードは変換せず生のコード値を表示する**。JV-Data仕様書のコード表を未確認のため
+  （`KeibaDataCollector`側のChakusaCD＝着差コードと同じ扱い。推測で変換表を決め打ちしない方針）
+- **`license_visible`は公開時点のLicenseGate判定のスナップショット**であり、表示のたびに許諾状態を
+  再確認するものではない。許諾が後から取り消された場合、既に公開済みの投稿は次回の更新まで
+  表示され続ける（`horse-race-custom-builder`の`hrc_is_race_visible`と同じ運用上の制約）
