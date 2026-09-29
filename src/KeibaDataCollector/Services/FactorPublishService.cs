@@ -66,9 +66,9 @@ namespace KeibaDataCollector.Services
                 throw new InvalidOperationException($"{_source.SourceName} RACE Open failed: {open.ReturnCode}");
             }
 
-            // レースキー(slug)ごとの距離・トラック種別。RA到着時に埋め、SE処理時に参照する
+            // レースキー(slug)ごとの距離・トラック種別・馬場状態コード。RA到着時に埋め、SE処理時に参照する
             // （BackfillServiceのBackfillRaceEntriesと同じ、RA→SEの到着順を前提にした組み方）。
-            var raceInfoByKey = new Dictionary<string, (int Distance, string TrackSurfaceCode)>();
+            var raceInfoByKey = new Dictionary<string, (int Distance, string TrackSurfaceCode, string BabaConditionCode)>();
             var entriesByRace = new Dictionary<string, List<(int Umaban, FactorScoringInput Input)>>();
             var raceKeys = new Dictionary<string, RaceKey>();
 
@@ -91,7 +91,8 @@ namespace KeibaDataCollector.Services
                         ra.SetDataB(ref buffer);
                         var (raceKey, ok) = TryBuildRaceKey(ra.id.Year, ra.id.MonthDay, ra.id.JyoCD, ra.id.RaceNum, targetDate);
                         if (!ok) continue;
-                        raceInfoByKey[raceKey.AsSlug()] = (SafeInt(ra.Kyori), Trim(ra.TrackCD));
+                        var trackSurfaceCode = Trim(ra.TrackCD);
+                        raceInfoByKey[raceKey.AsSlug()] = (SafeInt(ra.Kyori), trackSurfaceCode, BabaConditionFor(trackSurfaceCode, ra));
                     }
                     else if (typeId == "SE")
                     {
@@ -115,6 +116,7 @@ namespace KeibaDataCollector.Services
                             TrackCode = raceKey.TrackCode,
                             Distance = raceInfo.Distance,
                             TrackSurfaceCode = raceInfo.TrackSurfaceCode,
+                            BabaConditionCode = raceInfo.BabaConditionCode,
                             Waku = SafeInt(se.Wakuban),
                             JockeyCode = Trim(se.KisyuCode),
                             IJyoCd = Trim(se.IJyoCD),
@@ -243,6 +245,21 @@ namespace KeibaDataCollector.Services
         private static bool HasAnyScore(FactorScores s) =>
             s.ParamBias.HasValue || s.ParamPace.HasValue || s.ParamAgariQ.HasValue ||
             s.ParamJockeyRoi.HasValue || s.ParamPedigreeFit.HasValue || s.ParamTrainingAcc.HasValue;
+
+        /// <summary>そのレースの馬場種別（芝/ダート）に対応する馬場状態コードを選ぶ。
+        /// TrackCD（トラックコード）の先頭桁は1x=芝、2x=ダートを表す（AiIndexService.BuildSegmentの
+        /// NormalizeSurfaceと同じ判定）。障害等どちらにも当てはまらない場合はnull。
+        /// 仕様書§21「馬場変更が反映される」の検知（Validator、Issue #14）に使う。</summary>
+        private static string BabaConditionFor(string trackSurfaceCode, JV_RA_RACE ra)
+        {
+            if (string.IsNullOrEmpty(trackSurfaceCode)) return null;
+            switch (trackSurfaceCode[0])
+            {
+                case '1': return Trim(ra.TenkoBaba.SibaBabaCD);
+                case '2': return Trim(ra.TenkoBaba.DirtBabaCD);
+                default: return null;
+            }
+        }
 
         private static (RaceKey Key, bool Ok) TryBuildRaceKey(string year, string monthDay, string jyoCd, string raceNum, DateTime targetDate)
         {

@@ -106,6 +106,12 @@ namespace KeibaDataCollector.Models
         /// DBと照合」のうち馬名照合に使う（Issue #13）。</summary>
         public string HorseName { get; set; }
 
+        /// <summary>RAレコードの馬場状態コード（芝ならSibaBabaCD、ダートならDirtBabaCD。
+        /// FactorPublishService.BabaConditionForで選択）。仕様書§21「馬場変更が反映される」の
+        /// 検知に使う（Issue #14）。AI指数6ファクター自体はこの値を入力に使わない
+        /// （記録・照合専用）。</summary>
+        public string BabaConditionCode { get; set; }
+
         /// <summary>SEレコードの異常区分コード（0=異常なし、1=取消、2=除外、3=中止 等。
         /// JV-Data仕様書コード表2004参照）。仕様書§9「取消・除外馬を除外」の判定に使う。
         /// 空文字/未設定は「正常」として扱う（既存の出走表取得ロジックが必ず埋めるとは
@@ -159,6 +165,10 @@ namespace KeibaDataCollector.Models
         /// <summary>算出時点の騎手コード。仕様書§15「騎手変更→再計算」の検知に使う
         /// （Validatorが現在の騎手コードと突き合わせ、変わっていればブロックする）。</summary>
         public string JockeyCode { get; set; }
+
+        /// <summary>算出時点の馬場状態コード。仕様書§21「馬場変更が反映される」の検知に使う
+        /// （Issue #14。AI指数自体はこの値を入力に使わない、記録・照合専用）。</summary>
+        public string BabaConditionCode { get; set; }
 
         public FactorScores Factors { get; set; }
 

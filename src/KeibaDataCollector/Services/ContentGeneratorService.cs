@@ -98,6 +98,7 @@ namespace KeibaDataCollector.Services
                     KettoNum = s.KettoNum,
                     HorseName = s.HorseName,
                     JockeyCode = s.JockeyCode,
+                    BabaConditionCode = s.BabaConditionCode,
                     AiIndex = s.AiIndex,
                     DataCompleteness = s.DataCompleteness,
                     Factors = s.Factors,
@@ -145,6 +146,7 @@ namespace KeibaDataCollector.Services
                 TanshoOddsAtGeneration = best.TanshoOdds,
                 JockeyCodeAtGeneration = best.JockeyCode,
                 HorseNameAtGeneration = best.HorseName,
+                BabaConditionCodeAtGeneration = best.BabaConditionCode,
             };
         }
 
@@ -183,6 +185,7 @@ namespace KeibaDataCollector.Services
                 TanshoOddsAtGeneration = best.TanshoOdds,
                 JockeyCodeAtGeneration = best.JockeyCode,
                 HorseNameAtGeneration = best.HorseName,
+                BabaConditionCodeAtGeneration = best.BabaConditionCode,
             };
         }
 
@@ -217,6 +220,7 @@ namespace KeibaDataCollector.Services
                     TanshoOddsAtGeneration = c.TanshoOdds,
                     JockeyCodeAtGeneration = c.JockeyCode,
                     HorseNameAtGeneration = c.HorseName,
+                    BabaConditionCodeAtGeneration = c.BabaConditionCode,
                 });
             }
             return result;

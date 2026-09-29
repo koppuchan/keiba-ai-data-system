@@ -10,8 +10,9 @@ namespace KeibaDataCollector.Services
     ///
     /// ContentGeneratorService（Issue #5）が作った1件ずつのGeneratedPickを、公開する直前に
     /// この場所で最終チェックする。
-    ///   1. DB照合: 生成時点で見ていた馬番・血統登録番号・AI指数が、今のscoresテーブルの値と
-    ///      矛盾していないか（不一致があれば「生成後にレース情報が変わった」ことを意味する）。
+    ///   1. DB照合: 生成時点で見ていた馬番・血統登録番号・馬名・AI指数・騎手・馬場状態が、
+    ///      今のscoresテーブルの値と矛盾していないか（不一致があれば「生成後にレース情報が
+    ///      変わった」ことを意味する）。
     ///   2. LicenseGate: この開催場が今Web公開してよい状態か（仕様書§5「取得できる」≠
     ///      「公開してよい」の実運用ゲート。ここが最終防衛線）。
     /// どちらか一方でも不合格ならValidatorPassed=falseとし、呼び出し側（将来のPublisher、
@@ -60,6 +61,7 @@ namespace KeibaDataCollector.Services
                 KettoNum = pick.KettoNum,
                 HorseName = pick.HorseNameAtGeneration,
                 JockeyCode = pick.JockeyCodeAtGeneration,
+                BabaConditionCode = pick.BabaConditionCodeAtGeneration,
                 Category = pick.Category.ToString(),
                 ContentText = pick.Text,
                 Reasons = pick.Reasons,
@@ -141,6 +143,18 @@ namespace KeibaDataCollector.Services
                 ok = false;
                 notes.Add($"騎手が生成時（{pick.JockeyCodeAtGeneration}）から現在（{current.JockeyCode}）へ変更されています。" +
                           "次回のscore/content実行で新しい騎手を反映して再計算されます。");
+            }
+
+            // 仕様書§21「馬場変更が反映される」。騎手変更と同じ扱い（検知して公開停止、
+            // 「再計算」は次回の定期実行に委ねる）。AI指数6ファクター自体は馬場状態を入力に
+            // 使っていないため指数は変わらないが、「算出時点から馬場状態が変わった」という
+            // 事実そのものを古い情報のまま公開しないためのゲート。
+            if (!string.IsNullOrEmpty(pick.BabaConditionCodeAtGeneration) && !string.IsNullOrEmpty(current.BabaConditionCode)
+                && pick.BabaConditionCodeAtGeneration != current.BabaConditionCode)
+            {
+                ok = false;
+                notes.Add($"馬場状態が生成時（コード{pick.BabaConditionCodeAtGeneration}）から現在（コード{current.BabaConditionCode}）へ変化しています。" +
+                          "次回のscore/content実行で新しい馬場状態を反映して再計算されます。");
             }
 
             return ok;

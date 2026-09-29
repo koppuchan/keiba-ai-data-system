@@ -25,6 +25,7 @@ namespace KeibaDataCollector.Models
         public string KettoNum { get; set; }
         public string HorseName { get; set; }
         public string JockeyCode { get; set; }
+        public string BabaConditionCode { get; set; }
 
         public double? AiIndex { get; set; }
         public double DataCompleteness { get; set; }
@@ -66,6 +67,10 @@ namespace KeibaDataCollector.Models
         /// <summary>生成時点の馬名。仕様書§14「馬名・馬番・指数・レース番号をDBと照合」の
         /// 馬名照合に使う（Issue #13）。</summary>
         public string HorseNameAtGeneration { get; set; }
+
+        /// <summary>生成時点の馬場状態コード。仕様書§21「馬場変更が反映される」の検知に使う
+        /// （Issue #14）。</summary>
+        public string BabaConditionCodeAtGeneration { get; set; }
     }
 
     /// <summary>predictionsテーブルの1行に対応する永続化用レコード。PredictionStore.Insert専用の
@@ -80,6 +85,7 @@ namespace KeibaDataCollector.Models
         public string KettoNum { get; set; }
         public string HorseName { get; set; }
         public string JockeyCode { get; set; }
+        public string BabaConditionCode { get; set; }
         public string Category { get; set; }
         public string ContentText { get; set; }
         public List<string> Reasons { get; set; } = new List<string>();

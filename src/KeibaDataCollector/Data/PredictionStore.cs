@@ -53,6 +53,7 @@ namespace KeibaDataCollector.Data
                     ketto_num TEXT,
                     horse_name TEXT,
                     jockey_code TEXT,
+                    baba_condition_code TEXT,
                     category TEXT NOT NULL,
                     content_text TEXT NOT NULL,
                     reasons_json TEXT NOT NULL,
@@ -76,12 +77,12 @@ namespace KeibaDataCollector.Data
         {
             Exec(@"
                 INSERT INTO predictions
-                    (prediction_id, race_date, track_code, race_number, umaban, ketto_num, horse_name, jockey_code,
+                    (prediction_id, race_date, track_code, race_number, umaban, ketto_num, horse_name, jockey_code, baba_condition_code,
                      category, content_text, reasons_json, ai_index_snapshot, ninki_snapshot,
                      tansho_odds_snapshot, model_version, license_check_passed, validator_passed,
                      validator_notes, created_at_utc)
                 VALUES
-                    (@id, @date, @track, @raceNum, @umaban, @ketto, @horseName, @jockeyCode,
+                    (@id, @date, @track, @raceNum, @umaban, @ketto, @horseName, @jockeyCode, @babaCondition,
                      @category, @text, @reasons, @index, @ninki,
                      @odds, @modelVer, @licenseOk, @validatorOk,
                      @notes, @created);
@@ -96,6 +97,7 @@ namespace KeibaDataCollector.Data
                     p.AddWithValue("@ketto", (object)record.KettoNum ?? DBNull.Value);
                     p.AddWithValue("@horseName", (object)record.HorseName ?? DBNull.Value);
                     p.AddWithValue("@jockeyCode", (object)record.JockeyCode ?? DBNull.Value);
+                    p.AddWithValue("@babaCondition", (object)record.BabaConditionCode ?? DBNull.Value);
                     p.AddWithValue("@category", record.Category);
                     p.AddWithValue("@text", record.ContentText);
                     p.AddWithValue("@reasons", JsonConvert.SerializeObject(record.Reasons));
@@ -119,7 +121,7 @@ namespace KeibaDataCollector.Data
         {
             var result = new System.Collections.Generic.List<PredictionRecord>();
             using (var cmd = new SQLiteCommand(@"
-                SELECT prediction_id, race_date, track_code, race_number, umaban, ketto_num, horse_name, jockey_code,
+                SELECT prediction_id, race_date, track_code, race_number, umaban, ketto_num, horse_name, jockey_code, baba_condition_code,
                        category, content_text, reasons_json, ai_index_snapshot, ninki_snapshot,
                        tansho_odds_snapshot, model_version, license_check_passed, validator_passed,
                        validator_notes, created_at_utc
@@ -142,17 +144,18 @@ namespace KeibaDataCollector.Data
                             KettoNum = r.IsDBNull(5) ? null : r.GetString(5),
                             HorseName = r.IsDBNull(6) ? null : r.GetString(6),
                             JockeyCode = r.IsDBNull(7) ? null : r.GetString(7),
-                            Category = r.GetString(8),
-                            ContentText = r.GetString(9),
-                            Reasons = JsonConvert.DeserializeObject<System.Collections.Generic.List<string>>(r.GetString(10)) ?? new System.Collections.Generic.List<string>(),
-                            AiIndexSnapshot = r.IsDBNull(11) ? (double?)null : r.GetDouble(11),
-                            NinkiSnapshot = r.IsDBNull(12) ? (int?)null : r.GetInt32(12),
-                            TanshoOddsSnapshot = r.IsDBNull(13) ? (double?)null : r.GetDouble(13),
-                            ModelVersion = r.IsDBNull(14) ? null : r.GetString(14),
-                            LicenseCheckPassed = r.GetInt32(15) != 0,
-                            ValidatorPassed = r.GetInt32(16) != 0,
-                            ValidatorNotes = r.IsDBNull(17) ? null : r.GetString(17),
-                            CreatedAtUtc = DateTime.Parse(r.GetString(18)),
+                            BabaConditionCode = r.IsDBNull(8) ? null : r.GetString(8),
+                            Category = r.GetString(9),
+                            ContentText = r.GetString(10),
+                            Reasons = JsonConvert.DeserializeObject<System.Collections.Generic.List<string>>(r.GetString(11)) ?? new System.Collections.Generic.List<string>(),
+                            AiIndexSnapshot = r.IsDBNull(12) ? (double?)null : r.GetDouble(12),
+                            NinkiSnapshot = r.IsDBNull(13) ? (int?)null : r.GetInt32(13),
+                            TanshoOddsSnapshot = r.IsDBNull(14) ? (double?)null : r.GetDouble(14),
+                            ModelVersion = r.IsDBNull(15) ? null : r.GetString(15),
+                            LicenseCheckPassed = r.GetInt32(16) != 0,
+                            ValidatorPassed = r.GetInt32(17) != 0,
+                            ValidatorNotes = r.IsDBNull(18) ? null : r.GetString(18),
+                            CreatedAtUtc = DateTime.Parse(r.GetString(19)),
                         });
                     }
                 }
