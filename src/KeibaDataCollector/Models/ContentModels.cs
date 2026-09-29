@@ -57,4 +57,35 @@ namespace KeibaDataCollector.Models
         public int? NinkiAtGeneration { get; set; }
         public double? TanshoOddsAtGeneration { get; set; }
     }
+
+    /// <summary>predictionsテーブルの1行に対応する永続化用レコード。PredictionStore.Insert専用の
+    /// 入力型（テーブル自体がimmutableなため、更新用の型は用意していない）。</summary>
+    public class PredictionRecord
+    {
+        public string PredictionId { get; set; }
+        public DateTime RaceDate { get; set; }
+        public string TrackCode { get; set; }
+        public int RaceNumber { get; set; }
+        public int Umaban { get; set; }
+        public string KettoNum { get; set; }
+        public string Category { get; set; }
+        public string ContentText { get; set; }
+        public List<string> Reasons { get; set; } = new List<string>();
+        public double? AiIndexSnapshot { get; set; }
+        public int? NinkiSnapshot { get; set; }
+        public double? TanshoOddsSnapshot { get; set; }
+        public string ModelVersion { get; set; }
+        public bool LicenseCheckPassed { get; set; }
+        public bool ValidatorPassed { get; set; }
+        public string ValidatorNotes { get; set; }
+        public DateTime CreatedAtUtc { get; set; }
+    }
+
+    /// <summary>ValidatorService.ValidateAndSnapshotの戻り値。</summary>
+    public class ValidationOutcome
+    {
+        public string PredictionId { get; set; }
+        public bool Passed { get; set; }
+        public List<string> Notes { get; set; } = new List<string>();
+    }
 }
