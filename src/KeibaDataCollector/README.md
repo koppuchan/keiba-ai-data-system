@@ -4,7 +4,7 @@
 同一構成のWindows常駐アプリ）を土台に、JRAVAN＋競馬最強の法則WEB 全自動AI競馬データシステム仕様書の
 各コンポーネントを追加していくプロジェクト。詳細は [`DEVELOPMENT_PLAN.md`](../../DEVELOPMENT_PLAN.md) を参照。
 
-## 現状（Issue #10まで: 全機能実装済み・QA完了。実機ビルド・動作確認は未実施）
+## 現状（Issue #15まで: 全機能実装済み・QA完了・自動更新スケジュール登録済み。実機ビルド・動作確認は未実施）
 
 仕様書の全コンポーネント（Source Adapter〜Verification DB、LicenseGate、監視ダッシュボード）を実装済み。
 受け入れ基準（仕様書§21）のコードレビューによる確認結果は [`../../QA_REPORT.md`](../../QA_REPORT.md) を参照。
@@ -26,10 +26,36 @@ KeibaDataCollector.exe dbstats     # 蓄積済みSQLiteの件数・日付範囲�
 KeibaDataCollector.exe licensegate # LicenseGateの確認・更新（下記）
 ```
 
-運用（Windows Task Scheduler登録、`deploy.ps1`によるビルド→再起動手順等）も既存2リポジトリと
-同じ運用スクリプトをそのまま同梱している。詳細な注意点（JV-Link Setup取得は無人実行不可、
-ダイアログ対策、ページキャッシュ、地方競馬のデータ欠損傾向等）は移植元リポジトリのREADMEに
-記載されている運用知見がそのまま当てはまる。
+運用（`deploy.ps1`によるビルド→再起動手順等）は既存2リポジトリと同じ運用スクリプトをそのまま
+同梱している。詳細な注意点（JV-Link Setup取得は無人実行不可、ダイアログ対策、ページキャッシュ、
+地方競馬のデータ欠損傾向等）は移植元リポジトリのREADMEに記載されている運用知見がそのまま当てはまる。
+
+**Windows Task Scheduler登録**（`register-scheduled-tasks.ps1`）は、移植直後（Issue #2）は移植元と
+同じMorning/Predict/Watchの3タスクしか登録しておらず、Issue #3〜#14で追加したscore/trend/content/
+verify/dashboard（および移植元に元々あった`backfill incremental`）は`scheduled-*.bat`があるのに
+未登録のままだった（仕様書全体の再チェックで発覚。Issue #15で対応）。現在は仕様書§12の自動更新
+スケジュール表に沿って以下をすべて登録する。
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\register-scheduled-tasks.ps1
+```
+
+| タスク | 既定時刻 | 内容 |
+| --- | --- | --- |
+| `KeibaDataCollector-BackfillIncremental` | 02:00（1回） | 深夜: 履歴データの差分取得 |
+| `KeibaDataCollector-Morning` | 07:00（1回） | 早朝: 当日の出走表取得 |
+| `KeibaDataCollector-Score` | 07:30〜（20分毎/14時間） | 朝〜発走前〜レース間: AI指数算出 |
+| `KeibaDataCollector-TrendMorning` | 07:45（1回） | 朝: 事前想定傾向 |
+| `KeibaDataCollector-Content` | 07:40〜（20分毎/14時間） | 発走前〜レース間: 狙い馬・穴馬・危険な人気馬の生成・検証・公開（Scoreの後に走るようずらしてある） |
+| `KeibaDataCollector-Predict` | 09:00〜（15分毎/12時間） | 予想印の生成 |
+| `KeibaDataCollector-TrendLive` | 09:00〜（30分毎/12時間） | 開催中: 現時点の傾向 |
+| `KeibaDataCollector-Watch` | 09:30（1回、全確定で自動終了） | レース間: 結果・払戻監視 |
+| `KeibaDataCollector-Dashboard` | 07:00〜（30分毎/15時間） | 日中: 監視ダッシュボードのWordPress送信 |
+| `KeibaDataCollector-TrendFinal` | 21:30（1回） | 開催終了後: 本日の結果分析 |
+| `KeibaDataCollector-Verify` | 22:00（1回） | 開催終了後: レース後検証 |
+
+「前日夜: 翌日開催場・出走予定を準備」（仕様書§12）に対応する専用タスクは意図的に作っていない
+（`morning`は当日分を早朝に取得すれば間に合う設計のままのため。詳細はスクリプト冒頭のコメント参照）。
 
 ## LicenseGate（仕様書§5）
 
