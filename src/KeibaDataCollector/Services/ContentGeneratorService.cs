@@ -134,8 +134,12 @@ namespace KeibaDataCollector.Services
                 Category = PickCategory.Nerai,
                 Race = race,
                 Umaban = best.Umaban,
+                KettoNum = best.KettoNum,
                 Text = text,
                 Reasons = { $"ai_index={best.AiIndex:0.00}", $"data_completeness={best.DataCompleteness:0.00}" },
+                AiIndexAtGeneration = best.AiIndex,
+                NinkiAtGeneration = best.Ninki,
+                TanshoOddsAtGeneration = best.TanshoOdds,
             };
         }
 
@@ -165,8 +169,12 @@ namespace KeibaDataCollector.Services
                 Category = PickCategory.Ana,
                 Race = race,
                 Umaban = best.Umaban,
+                KettoNum = best.KettoNum,
                 Text = text,
                 Reasons = { $"ninki={best.Ninki}", $"ai_index={best.AiIndex:0.00}", $"index_rank={indexRank}/{fieldSize}" },
+                AiIndexAtGeneration = best.AiIndex,
+                NinkiAtGeneration = best.Ninki,
+                TanshoOddsAtGeneration = best.TanshoOdds,
             };
         }
 
@@ -192,8 +200,12 @@ namespace KeibaDataCollector.Services
                     Category = PickCategory.Kiken,
                     Race = race,
                     Umaban = c.Umaban,
+                    KettoNum = c.KettoNum,
                     Text = text,
                     Reasons = { $"ninki={c.Ninki}", $"weak_factor={concern.Value.Name}={concern.Value.Value:0.00}" },
+                    AiIndexAtGeneration = c.AiIndex,
+                    NinkiAtGeneration = c.Ninki,
+                    TanshoOddsAtGeneration = c.TanshoOdds,
                 });
             }
             return result;
