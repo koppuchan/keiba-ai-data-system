@@ -225,6 +225,148 @@ namespace KeibaDataCollector.WordPress
             return true;
         }
 
+        // ---- Digest（AI指数TOP5・本日の傾向・狙い馬/穴馬/危険な人気馬、仕様書§3・§13） ----
+
+        /// <summary>
+        /// 自動公開ON/OFF（仕様書§13「管理画面に自動公開ON/OFFと手動再実行を用意」）。
+        /// WordPress側（src/wordpress-plugin/keiba-ai-digest）の管理画面チェックボックスと連動する
+        /// REST設定エンドポイントを見る。
+        ///
+        /// フェイルセーフ方針: エンドポイントが無い・取得に失敗した場合は「無効」扱いにする
+        /// （LicenseGateと同じ、判定できないなら公開しない方針。プラグイン未導入・設定未初期化の
+        /// 状態で誤って公開し続けることを避ける）。
+        /// </summary>
+        public async Task<bool> IsAutoPublishEnabledAsync()
+        {
+            try
+            {
+                var response = await _http.GetAsync($"{_baseUrl}/wp-json/keiba-ai/v1/settings");
+                if (!response.IsSuccessStatusCode) return false;
+
+                var body = await response.Content.ReadAsStringAsync();
+                var settings = JsonConvert.DeserializeObject<PublishSettings>(body);
+                return settings?.AutoPublishEnabled ?? false;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[WordPress] 自動公開設定の取得に失敗。安全側でfalse扱いにします: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>1開催場・1日分のダイジェスト（keiba_digestカスタム投稿）をidempotentに反映する。
+        /// digest_keyで既存投稿を検索し、あれば更新・無ければ新規作成する。全ブロックが空の場合は
+        /// 呼び出し側（DigestPublisherService）が事前に弾く想定だが、念のためここでも空なら送らない。</summary>
+        /// <returns>実際に送信したらtrue。空データで見送った場合はfalse。</returns>
+        public async Task<bool> UpsertDigestAsync(DigestPayload payload)
+        {
+            if (!payload.HasAnyContent) return false;
+
+            var existingId = await FindDigestPostIdAsync(payload.DigestKey);
+
+            var requestPayload = new
+            {
+                title = $"{payload.RaceDate:yyyy/MM/dd} {payload.TrackCode} 本日のAI指数・傾向・狙い目",
+                status = "publish",
+                meta = new
+                {
+                    digest_key = payload.DigestKey,
+                    race_date = payload.RaceDate.ToString("yyyy-MM-dd"),
+                    track_code = payload.TrackCode,
+                    ai_index_top5 = JsonConvert.SerializeObject(payload.AiIndexTop5, CamelCaseSettings),
+                    trend_morning = payload.TrendMorning != null ? JsonConvert.SerializeObject(payload.TrendMorning, CamelCaseSettings) : "",
+                    trend_live = payload.TrendLive != null ? JsonConvert.SerializeObject(payload.TrendLive, CamelCaseSettings) : "",
+                    trend_final = payload.TrendFinal != null ? JsonConvert.SerializeObject(payload.TrendFinal, CamelCaseSettings) : "",
+                    picks = JsonConvert.SerializeObject(payload.Picks, CamelCaseSettings),
+                    license_visible = payload.LicenseVisible ? "1" : "0",
+                    updated_at = DateTime.UtcNow.ToString("o"),
+                }
+            };
+
+            await SendDigestAsync(existingId, requestPayload);
+            return true;
+        }
+
+        private async Task<int?> FindDigestPostIdAsync(string digestKey)
+        {
+            var url = $"{_baseUrl}/wp-json/wp/v2/keiba_digest?meta_key=digest_key&meta_value={digestKey}";
+
+            for (int attempt = 1; ; attempt++)
+            {
+                HttpResponseMessage response;
+                try
+                {
+                    response = await _http.GetAsync(url);
+                }
+                catch (HttpRequestException ex) when (attempt < SendMaxAttempts)
+                {
+                    Console.WriteLine(
+                        $"[WordPress] {digestKey} の既存ダイジェスト検索に失敗（{attempt}/{SendMaxAttempts}回目、通信エラー）。" +
+                        $"{SendRetryDelay.TotalSeconds:0}秒後に再試行します: {ex.Message}");
+                    await Task.Delay(SendRetryDelay);
+                    continue;
+                }
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    if (IsTransientHttpStatus(response.StatusCode) && attempt < SendMaxAttempts)
+                    {
+                        await Task.Delay(SendRetryDelay);
+                        continue;
+                    }
+                    var body = await response.Content.ReadAsStringAsync();
+                    throw new InvalidOperationException(
+                        $"WordPress digest_key 検索に失敗 ({response.StatusCode}): {body}");
+                }
+
+                var okBody = await response.Content.ReadAsStringAsync();
+                var posts = JsonConvert.DeserializeObject<WpPost[]>(okBody);
+                return posts != null && posts.Length > 0 ? posts[0].Id : (int?)null;
+            }
+        }
+
+        private async Task SendDigestAsync(int? existingId, object payload)
+        {
+            var json = JsonConvert.SerializeObject(payload);
+            var path = existingId.HasValue
+                ? $"{_baseUrl}/wp-json/wp/v2/keiba_digest/{existingId.Value}"
+                : $"{_baseUrl}/wp-json/wp/v2/keiba_digest";
+
+            for (int attempt = 1; ; attempt++)
+            {
+                var content = new StringContent(json, Encoding.UTF8, "application/json");
+                HttpResponseMessage response;
+                try
+                {
+                    response = await _http.PostAsync(path, content);
+                }
+                catch (HttpRequestException ex) when (attempt < SendMaxAttempts)
+                {
+                    Console.WriteLine(
+                        $"[WordPress] ダイジェスト送信に失敗（{attempt}/{SendMaxAttempts}回目、通信エラー）。" +
+                        $"{SendRetryDelay.TotalSeconds:0}秒後に再送します: {ex.Message}");
+                    await Task.Delay(SendRetryDelay);
+                    continue;
+                }
+
+                if (response.IsSuccessStatusCode) return;
+
+                var body = await response.Content.ReadAsStringAsync();
+                if (IsTransientHttpStatus(response.StatusCode) && attempt < SendMaxAttempts)
+                {
+                    await Task.Delay(SendRetryDelay);
+                    continue;
+                }
+                throw new InvalidOperationException($"WordPress digest API failed ({response.StatusCode}): {body}");
+            }
+        }
+
+        private class PublishSettings
+        {
+            [JsonProperty("autoPublishEnabled")]
+            public bool AutoPublishEnabled { get; set; }
+        }
+
         /// <summary>race_key が一致する既存投稿を探す。無ければ null。
         ///
         /// 一時的なサーバーエラー(503等)はSendAsyncと同様に再送する。

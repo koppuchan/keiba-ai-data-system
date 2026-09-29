@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using KeibaDataCollector.Data;
@@ -262,10 +263,16 @@ namespace KeibaDataCollector
                         using (var scoresStore = new ScoresStore(store.Connection))
                         using (var licenseGateStore = new LicenseGateStore(store.Connection))
                         using (var predictionStore = new PredictionStore(store.Connection))
+                        using (var trendStore = new TrendStore(store.Connection))
                         {
                             var validator = new ValidatorService(scoresStore, licenseGateStore, predictionStore);
-                            RunContentFor(jvLink, scoresStore, validator, targetDate);
-                            RunContentFor(umaConn, scoresStore, validator, targetDate);
+                            var wp = new WordPressClient(
+                                AppConfig.WordPressBaseUrl,
+                                AppConfig.WordPressUser,
+                                AppConfig.WordPressAppPassword);
+                            var publisher = new DigestPublisherService(wp, licenseGateStore);
+                            RunContentFor(jvLink, scoresStore, trendStore, validator, publisher, targetDate);
+                            RunContentFor(umaConn, scoresStore, trendStore, validator, publisher, targetDate);
                         }
                         break;
                     }
@@ -457,7 +464,8 @@ namespace KeibaDataCollector
             }
         }
 
-        private static void RunContentFor(JvSpecComDataSource source, ScoresStore scoresStore, ValidatorService validator, DateTime targetDate)
+        private static void RunContentFor(JvSpecComDataSource source, ScoresStore scoresStore, TrendStore trendStore,
+            ValidatorService validator, DigestPublisherService publisher, DateTime targetDate)
         {
             try
             {
@@ -481,29 +489,43 @@ namespace KeibaDataCollector
                         $"穴馬={picks.Count(p => p.Category == PickCategory.Ana)}件 " +
                         $"危険な人気馬={picks.Count(p => p.Category == PickCategory.Kiken)}件");
 
-                    int passed = 0, blocked = 0;
+                    var validated = new List<(GeneratedPick Pick, ValidationOutcome Outcome)>();
                     foreach (var pick in picks)
                     {
                         var outcome = validator.ValidateAndSnapshot(pick, isCentral);
+                        validated.Add((pick, outcome));
                         if (outcome.Passed)
                         {
-                            passed++;
                             Console.WriteLine($"    [OK] [{pick.Category}] {pick.Text}");
                         }
                         else
                         {
-                            blocked++;
                             Console.WriteLine($"    [公開停止] [{pick.Category}] {pick.Text}");
                             foreach (var note in outcome.Notes)
                                 Console.WriteLine($"        - {note}");
                         }
                     }
-                    Console.WriteLine($"[{source.SourceName}] {targetDate:yyyy-MM-dd} 場={trackCode} Validator結果: 公開可={passed}件 公開停止={blocked}件");
+                    var passedCount = validated.Count(v => v.Outcome.Passed);
+                    Console.WriteLine($"[{source.SourceName}] {targetDate:yyyy-MM-dd} 場={trackCode} Validator結果: " +
+                        $"公開可={passedCount}件 公開停止={validated.Count - passedCount}件");
+
+                    var top5 = scoresStore.GetVenueTop5(targetDate, trackCode);
+                    var trendMorning = trendStore.Get(targetDate, trackCode, TrendStage.Morning);
+                    var trendLive = trendStore.Get(targetDate, trackCode, TrendStage.Live);
+                    var trendFinal = trendStore.Get(targetDate, trackCode, TrendStage.Final);
+
+                    var publishOutcome = publisher
+                        .PublishAsync(targetDate, trackCode, isCentral, top5, trendMorning, trendLive, trendFinal, validated)
+                        .GetAwaiter().GetResult();
+
+                    Console.WriteLine(publishOutcome.WasPublished
+                        ? $"[{source.SourceName}] {targetDate:yyyy-MM-dd} 場={trackCode} WordPress公開完了（ピック{publishOutcome.PublishedPickCount}件、公開停止{publishOutcome.BlockedPickCount}件）"
+                        : $"[{source.SourceName}] {targetDate:yyyy-MM-dd} 場={trackCode} WordPress公開を見送り: {publishOutcome.SkipReason}");
                 }
             }
             catch (Exception ex)
             {
-                LogFailure(source.SourceName, "本日の狙い馬・穴馬・危険な人気馬の生成に失敗（このソースのみスキップして続行）", ex);
+                LogFailure(source.SourceName, "本日の狙い馬・穴馬・危険な人気馬の生成・公開に失敗（このソースのみスキップして続行）", ex);
             }
         }
 
