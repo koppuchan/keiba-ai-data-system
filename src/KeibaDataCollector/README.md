@@ -4,7 +4,7 @@
 同一構成のWindows常駐アプリ）を土台に、JRAVAN＋競馬最強の法則WEB 全自動AI競馬データシステム仕様書の
 各コンポーネントを追加していくプロジェクト。詳細は [`DEVELOPMENT_PLAN.md`](../../DEVELOPMENT_PLAN.md) を参照。
 
-## 現状（Issue #3まで: 既存機能のポート + LicenseGate土台 + AI指数エンジン）
+## 現状（Issue #4まで: 既存機能のポート + LicenseGate土台 + AI指数エンジン + Trend Engine）
 
 `horse-race-custom-builder` の実装をそのまま移植し、このリポジトリ単体で既存システムと同等の
 コマンド一式（`setup` / `morning` / `predict` / `score` / `watch` / `probe` / `backfill` / `dbstats`）
@@ -70,6 +70,28 @@ KeibaDataCollector.exe weights set central:turf 1.2 1.0 1.0 1.5 0.8 1.0
 
 WordPressへのAI指数TOP5の実publishはまだ無い（算出結果はscoreコマンド実行時にコンソールへログ出力
 されるのみ）。Content Generator（Issue #5）・WordPress Publisher拡張（Issue #7）で接続する。
+
+## Trend Engine（仕様書§10 本日の傾向）
+
+`trend`コマンドで、当日開催中の各競馬場について脚質・枠・馬場・上がり・通過順の5軸を集計し、
+`trend_snapshots`テーブルへ保存する。3段階（`morning`/`live`/`final`）はそれぞれ独立して実行する
+（自動では遷移しない。タスクスケジューラで朝1回・開催中は30〜60分おき・終了後1回、のように登録する）。
+
+```
+KeibaDataCollector.exe trend morning   # 過去データ(開催場全体・全年合算)+当日確定の天候・馬場状態
+KeibaDataCollector.exe trend live      # ここまでに確定した当日結果を逐次集計
+KeibaDataCollector.exe trend final     # 終了後、全当日結果で集計
+```
+
+- 最低サンプル数（脚質・枠・上がり=20、通過順=10。レース単位の指標のため少なめ）未満の集計は
+  断定的な値（先行有利/差し有利等）を出さず、サンプル数だけを保持する
+- 天候・馬場状態は常に当日のRACEデータから直接読む（開催中に馬場状態が変わることがあるため）
+- **既知の制約**: `morning`段階の通過順傾向（最終コーナー先頭馬の勝率）は算出できない。
+  `BackfillService`が過去分のコーナー通過順（`race_entries.CornerPassage4`）を意図的に
+  保存していないため、母集団が無い。`SampleCount=0`のまま返す（捏造しない）。`live`/`final`は
+  当日データを直接読むため、この制約を受けずに算出できる
+
+WordPressへの本日の傾向の実publishはまだ無い（Content Generator/Publisher拡張で接続）。
 
 ## ビルドについて
 

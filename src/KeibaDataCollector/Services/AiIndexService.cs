@@ -122,8 +122,9 @@ namespace KeibaDataCollector.Services
         /// 4=失格、5=降着、6=何らかの理由で著しく遅れた 等。0または空以外はすべて
         /// 「通常のレース結果として扱えない」ため、AI指数TOP5からは一律除外する
         /// （降着・失格のような着順確定後の区分がここに来るのはレース後のみで、
-        /// 出走前時点では基本的に取消・除外・出走取消のいずれか）。</summary>
-        private static bool IsScratchedCode(string ijyoCd)
+        /// 出走前時点では基本的に取消・除外・出走取消のいずれか）。
+        /// TrendEngineService（仕様書§10）でも同じ判定が必要なためpublicにしてある。</summary>
+        public static bool IsScratchedCode(string ijyoCd)
         {
             var t = (ijyoCd ?? string.Empty).Trim();
             return t.Length > 0 && t != "0";
