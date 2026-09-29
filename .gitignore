@@ -1,0 +1,12 @@
+bin/
+obj/
+*.user
+.vs/
+secrets.local.bat
+.env
+
+# ローカルSQLite（VPS側にのみ置く。license_gateの承認状態もここに入るため機密度が高い）
+data/
+*.sqlite3
+
+logs/
