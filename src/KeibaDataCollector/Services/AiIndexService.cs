@@ -77,6 +77,7 @@ namespace KeibaDataCollector.Services
                 KettoNum = input.KettoNum,
                 HorseName = input.HorseName,
                 JockeyCode = input.JockeyCode,
+                BabaConditionCode = input.BabaConditionCode,
                 Factors = factors,
                 AiIndex = index,
                 DataCompleteness = completeness,

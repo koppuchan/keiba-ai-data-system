@@ -67,6 +67,7 @@ namespace KeibaDataCollector.Data
                     ketto_num TEXT,
                     horse_name TEXT,
                     jockey_code TEXT,
+                    baba_condition_code TEXT,
                     param_bias REAL,
                     param_pace REAL,
                     param_agari_q REAL,
@@ -164,17 +165,18 @@ namespace KeibaDataCollector.Data
         {
             Exec(@"
                 INSERT INTO scores
-                    (race_date, track_code, race_number, umaban, ketto_num, horse_name, jockey_code,
+                    (race_date, track_code, race_number, umaban, ketto_num, horse_name, jockey_code, baba_condition_code,
                      param_bias, param_pace, param_agari_q, param_jockey_roi, param_pedigree_fit, param_training_acc,
                      ai_index, data_completeness, is_scratched, model_version, feature_version, data_cutoff_utc, computed_at_utc)
                 VALUES
-                    (@date, @track, @raceNum, @umaban, @ketto, @horseName, @jockeyCode,
+                    (@date, @track, @raceNum, @umaban, @ketto, @horseName, @jockeyCode, @babaCondition,
                      @bias, @pace, @agari, @jockey, @pedigree, @training,
                      @index, @completeness, @scratched, @modelVer, @featureVer, @cutoff, @computed)
                 ON CONFLICT(race_date, track_code, race_number, umaban) DO UPDATE SET
                     ketto_num=excluded.ketto_num,
                     horse_name=excluded.horse_name,
                     jockey_code=excluded.jockey_code,
+                    baba_condition_code=excluded.baba_condition_code,
                     param_bias=excluded.param_bias,
                     param_pace=excluded.param_pace,
                     param_agari_q=excluded.param_agari_q,
@@ -198,6 +200,7 @@ namespace KeibaDataCollector.Data
                     p.AddWithValue("@ketto", (object)s.KettoNum ?? DBNull.Value);
                     p.AddWithValue("@horseName", (object)s.HorseName ?? DBNull.Value);
                     p.AddWithValue("@jockeyCode", (object)s.JockeyCode ?? DBNull.Value);
+                    p.AddWithValue("@babaCondition", (object)s.BabaConditionCode ?? DBNull.Value);
                     p.AddWithValue("@bias", (object)s.Factors?.ParamBias ?? DBNull.Value);
                     p.AddWithValue("@pace", (object)s.Factors?.ParamPace ?? DBNull.Value);
                     p.AddWithValue("@agari", (object)s.Factors?.ParamAgariQ ?? DBNull.Value);
@@ -221,7 +224,7 @@ namespace KeibaDataCollector.Data
         {
             var result = new List<AiIndexResult>();
             using (var cmd = new SQLiteCommand(@"
-                SELECT race_date, track_code, race_number, umaban, ketto_num, horse_name, jockey_code,
+                SELECT race_date, track_code, race_number, umaban, ketto_num, horse_name, jockey_code, baba_condition_code,
                        param_bias, param_pace, param_agari_q, param_jockey_roi, param_pedigree_fit, param_training_acc,
                        ai_index, data_completeness, is_scratched, model_version, feature_version, data_cutoff_utc, computed_at_utc
                 FROM scores
@@ -248,7 +251,7 @@ namespace KeibaDataCollector.Data
         {
             var result = new List<AiIndexResult>();
             using (var cmd = new SQLiteCommand(@"
-                SELECT race_date, track_code, race_number, umaban, ketto_num, horse_name, jockey_code,
+                SELECT race_date, track_code, race_number, umaban, ketto_num, horse_name, jockey_code, baba_condition_code,
                        param_bias, param_pace, param_agari_q, param_jockey_roi, param_pedigree_fit, param_training_acc,
                        ai_index, data_completeness, is_scratched, model_version, feature_version, data_cutoff_utc, computed_at_utc
                 FROM scores
@@ -278,22 +281,23 @@ namespace KeibaDataCollector.Data
                 KettoNum = r.IsDBNull(4) ? null : r.GetString(4),
                 HorseName = r.IsDBNull(5) ? null : r.GetString(5),
                 JockeyCode = r.IsDBNull(6) ? null : r.GetString(6),
+                BabaConditionCode = r.IsDBNull(7) ? null : r.GetString(7),
                 Factors = new FactorScores
                 {
-                    ParamBias = r.IsDBNull(7) ? (double?)null : r.GetDouble(7),
-                    ParamPace = r.IsDBNull(8) ? (double?)null : r.GetDouble(8),
-                    ParamAgariQ = r.IsDBNull(9) ? (double?)null : r.GetDouble(9),
-                    ParamJockeyRoi = r.IsDBNull(10) ? (double?)null : r.GetDouble(10),
-                    ParamPedigreeFit = r.IsDBNull(11) ? (double?)null : r.GetDouble(11),
-                    ParamTrainingAcc = r.IsDBNull(12) ? (double?)null : r.GetDouble(12),
+                    ParamBias = r.IsDBNull(8) ? (double?)null : r.GetDouble(8),
+                    ParamPace = r.IsDBNull(9) ? (double?)null : r.GetDouble(9),
+                    ParamAgariQ = r.IsDBNull(10) ? (double?)null : r.GetDouble(10),
+                    ParamJockeyRoi = r.IsDBNull(11) ? (double?)null : r.GetDouble(11),
+                    ParamPedigreeFit = r.IsDBNull(12) ? (double?)null : r.GetDouble(12),
+                    ParamTrainingAcc = r.IsDBNull(13) ? (double?)null : r.GetDouble(13),
                 },
-                AiIndex = r.IsDBNull(13) ? (double?)null : r.GetDouble(13),
-                DataCompleteness = r.GetDouble(14),
-                IsScratched = r.GetInt32(15) != 0,
-                ModelVersion = r.GetString(16),
-                FeatureVersion = r.GetString(17),
-                DataCutoffUtc = DateTime.Parse(r.GetString(18)),
-                ComputedAtUtc = DateTime.Parse(r.GetString(19)),
+                AiIndex = r.IsDBNull(14) ? (double?)null : r.GetDouble(14),
+                DataCompleteness = r.GetDouble(15),
+                IsScratched = r.GetInt32(16) != 0,
+                ModelVersion = r.GetString(17),
+                FeatureVersion = r.GetString(18),
+                DataCutoffUtc = DateTime.Parse(r.GetString(19)),
+                ComputedAtUtc = DateTime.Parse(r.GetString(20)),
             };
         }
 

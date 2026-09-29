@@ -97,6 +97,7 @@ namespace KeibaDataCollector.Services
                 KettoNum = t.KettoNum,
                 HorseName = t.HorseName,
                 JockeyCode = t.JockeyCode,
+                BabaConditionCode = t.BabaConditionCode,
                 Category = "AiIndexTop5",
                 ContentText = string.IsNullOrEmpty(t.HorseName)
                     ? $"AI指数TOP5: {t.RaceNumber}R {t.Umaban}番 指数{t.AiIndex:0.1}"
