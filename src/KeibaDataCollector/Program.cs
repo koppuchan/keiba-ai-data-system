@@ -220,6 +220,33 @@ namespace KeibaDataCollector
                         }
                         break;
 
+                    case "trend":
+                    {
+                        // trend <morning|live|final> [yyyy-MM-dd]
+                        // args[0]は"trend"自身（modeトークン）のため、ステージは args[1] を見る
+                        // （licensegate/weightsと同じ落とし穴を踏まないよう、ここは明示的にargs[1]を使う）。
+                        if (args.Length < 2 || !Enum.TryParse<TrendStage>(args[1], ignoreCase: true, out var stage))
+                        {
+                            Console.WriteLine("使い方: KeibaDataCollector.exe trend <morning|live|final> [yyyy-MM-dd]");
+                            break;
+                        }
+                        var targetDate = DateTime.Today;
+                        if (args.Length > 2 && DateTime.TryParseExact(args[2], "yyyy-MM-dd",
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            System.Globalization.DateTimeStyles.None, out var parsed))
+                        {
+                            targetDate = parsed;
+                        }
+
+                        using (var store = new HistoricalDataStore(AppConfig.HistoricalDbPath))
+                        using (var trendStore = new TrendStore(store.Connection))
+                        {
+                            RunTrendFor(jvLink, store, trendStore, targetDate, stage);
+                            RunTrendFor(umaConn, store, trendStore, targetDate, stage);
+                        }
+                        break;
+                    }
+
                     default:
                         PrintUsage();
                         break;
@@ -235,7 +262,7 @@ namespace KeibaDataCollector
 
         private static void PrintUsage()
         {
-            Console.WriteLine("使い方: KeibaDataCollector.exe [setup|morning|predict|score|watch|probe|backfill|dbstats|licensegate|weights]");
+            Console.WriteLine("使い方: KeibaDataCollector.exe [setup|morning|predict|score|watch|probe|backfill|dbstats|trend|licensegate|weights]");
             Console.WriteLine("  setup       : 初回のみ。利用キー等をGUIダイアログで設定する。");
             Console.WriteLine("  morning     : 朝一バッチ。当日の出走表を取得しWordPressへ反映する。");
             Console.WriteLine("  predict     : 朝一オッズの人気順から予想印を生成しWordPressへ反映する。");
@@ -250,6 +277,9 @@ namespace KeibaDataCollector
             Console.WriteLine("              incremental: 差分のみ(option=Normal)。無人実行可。");
             Console.WriteLine("              ソースを絞る場合: backfill jv / backfill uma");
             Console.WriteLine("  dbstats     : backfillで蓄積したSQLiteの件数・日付範囲を確認する。");
+            Console.WriteLine("  trend       : 本日の傾向（脚質・枠・馬場・上がり・通過順）を算出する。");
+            Console.WriteLine("              trend <morning|live|final> [yyyy-MM-dd]");
+            Console.WriteLine("              morning=過去データ+当日確定情報、live=開催中の当日結果逐次、final=終了後の全当日結果。");
             Console.WriteLine("  licensegate : LicenseGate（公開許諾状態）の確認・更新。詳細は `licensegate` (引数なし) 実行。");
             Console.WriteLine("  weights     : AI指数6ファクターの重み設定の確認・更新。詳細は `weights` (引数なし) 実行。");
         }
@@ -367,6 +397,38 @@ namespace KeibaDataCollector
             catch (Exception ex)
             {
                 LogFailure(source.SourceName, "6ファクター算出に失敗（このソースのみスキップして続行）", ex);
+            }
+        }
+
+        private static void RunTrendFor(JvSpecComDataSource source, HistoricalDataStore historical, TrendStore trendStore, DateTime targetDate, TrendStage stage)
+        {
+            try
+            {
+                source.Initialize(AppConfig.JvLinkSoftwareId);
+
+                // 当日この開催場が無いソース（例: 地方開催が無い日のJV-Link）は0件で正常に終わる。
+                var venues = RaceDiscovery.ForDate(source, targetDate)
+                    .Select(k => k.TrackCode).Distinct().ToList();
+                if (venues.Count == 0)
+                {
+                    Console.WriteLine($"[{source.SourceName}] {targetDate:yyyy-MM-dd} 該当開催場なし。");
+                    return;
+                }
+
+                var engine = new TrendEngineService(source, historical, trendStore);
+                foreach (var trackCode in venues)
+                {
+                    var snapshot = engine.ComputeAndSave(targetDate, trackCode, stage);
+                    Console.WriteLine(
+                        $"[{source.SourceName}] {targetDate:yyyy-MM-dd} 場={trackCode} 傾向({stage}) 算出完了: " +
+                        $"対象レース数={snapshot.RacesConsidered}, 脚質サンプル={snapshot.Pace.SampleCount}, " +
+                        $"枠サンプル合計={snapshot.PostPosition.ByWaku.Values.Sum(w => w.SampleCount)}, " +
+                        $"上がりサンプル={snapshot.Agari.SampleCount}, 通過順サンプル={snapshot.Passage.SampleCount}");
+                }
+            }
+            catch (Exception ex)
+            {
+                LogFailure(source.SourceName, "本日の傾向の算出に失敗（このソースのみスキップして続行）", ex);
             }
         }
 

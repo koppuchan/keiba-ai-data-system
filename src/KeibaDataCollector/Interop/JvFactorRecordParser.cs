@@ -145,10 +145,20 @@ namespace KeibaDataCollector.Interop
         /// （=と-の違いや*の位置）までは区別しない単純化をしている
         /// （先行有利度という大づかみな指標には十分な精度と判断）。
         /// 該当コーナーの記録が無ければ空配列を返す。</summary>
-        public static int[] ParseEarliestCornerOrder(JV_RA_RACE ra)
+        public static int[] ParseEarliestCornerOrder(JV_RA_RACE ra) =>
+            ParseCornerOrder(ra, pickLatest: false);
+
+        /// <summary>ParseEarliestCornerOrderと同じ記法・同じ単純化で、最終コーナー
+        /// （コーナー番号が最大）の通過順位を先頭から並んだ馬番の配列に変換する。
+        /// Trend Engine（仕様書§10）の通過順傾向「最終コーナーを先頭で通過した馬の勝率」用。
+        /// 該当コーナーの記録が無ければ空配列を返す。</summary>
+        public static int[] ParseLatestCornerOrder(JV_RA_RACE ra) =>
+            ParseCornerOrder(ra, pickLatest: true);
+
+        private static int[] ParseCornerOrder(JV_RA_RACE ra, bool pickLatest)
         {
-            string earliestJyuni = null;
-            var earliestCornerNum = int.MaxValue;
+            string selectedJyuni = null;
+            var selectedCornerNum = pickLatest ? int.MinValue : int.MaxValue;
             if (ra.CornerInfo != null)
             {
                 foreach (var corner in ra.CornerInfo)
@@ -156,16 +166,19 @@ namespace KeibaDataCollector.Interop
                     var jyuni = Trim(corner.Jyuni);
                     if (jyuni.Length == 0) continue;
                     var cornerNum = SafeInt(corner.Corner);
-                    if (cornerNum > 0 && cornerNum < earliestCornerNum)
+                    if (cornerNum <= 0) continue;
+
+                    var better = pickLatest ? cornerNum > selectedCornerNum : cornerNum < selectedCornerNum;
+                    if (better)
                     {
-                        earliestCornerNum = cornerNum;
-                        earliestJyuni = jyuni;
+                        selectedCornerNum = cornerNum;
+                        selectedJyuni = jyuni;
                     }
                 }
             }
-            if (earliestJyuni == null) return Array.Empty<int>();
+            if (selectedJyuni == null) return Array.Empty<int>();
 
-            var matches = Regex.Matches(earliestJyuni, @"\d+");
+            var matches = Regex.Matches(selectedJyuni, @"\d+");
             var result = new int[matches.Count];
             for (int i = 0; i < matches.Count; i++)
                 result[i] = int.Parse(matches[i].Value);
