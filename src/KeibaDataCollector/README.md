@@ -4,7 +4,7 @@
 同一構成のWindows常駐アプリ）を土台に、JRAVAN＋競馬最強の法則WEB 全自動AI競馬データシステム仕様書の
 各コンポーネントを追加していくプロジェクト。詳細は [`DEVELOPMENT_PLAN.md`](../../DEVELOPMENT_PLAN.md) を参照。
 
-## 現状（Issue #4まで: 既存機能のポート + LicenseGate土台 + AI指数エンジン + Trend Engine）
+## 現状（Issue #5まで: 既存機能のポート + LicenseGate土台 + AI指数エンジン + Trend Engine + Content Generator）
 
 `horse-race-custom-builder` の実装をそのまま移植し、このリポジトリ単体で既存システムと同等の
 コマンド一式（`setup` / `morning` / `predict` / `score` / `watch` / `probe` / `backfill` / `dbstats`）
@@ -92,6 +92,33 @@ KeibaDataCollector.exe trend final     # 終了後、全当日結果で集計
   当日データを直接読むため、この制約を受けずに算出できる
 
 WordPressへの本日の傾向の実publishはまだ無い（Content Generator/Publisher拡張で接続）。
+
+## Content Generator（仕様書§11 今日の狙い馬・穴馬・危険な人気馬）
+
+`content`コマンドで、`score`コマンドが永続化したAI指数（`scores`テーブル）とレース単位のオッズ・
+人気（速報オッズ0B31から取得）を突き合わせ、レースごとに狙い馬・穴馬・危険な人気馬を判定する。
+
+- **狙い馬**: レース内でAI指数最上位、かつデータ充足率50%以上、指数55以上（偏差値50=平均なので
+  「平均よりやや上」を基準にしている）
+- **穴馬**: 6番人気以下（人気薄）だが、レース内のAI指数順位が上位半分に入る馬。オッズを取得できない
+  レースは判定しない（仕様書§11の明記通り）
+- **危険な人気馬**: 3番人気以内（人気上位）だが、6ファクターのいずれかが偏差値40未満（平均より
+  1標準偏差以上低い）の馬。弱点となった項目名を文章に含める
+- 文章はDBの実数値のみを埋め込んだ固定テンプレートで生成する（AIに数値や馬番を自由生成させない、
+  仕様書§14）。「絶対」「確実」等の禁止表現が万一テンプレートに混入していないかを生成後に
+  機械的にチェックする
+- 取消・除外馬は、`score`実行時点のスナップショットではなく**生成時点で当日データを読み直して**
+  除外する（仕様書§11「取消・騎手変更・馬場変更が未反映なら公開停止または再計算」の取消・除外分に
+  対応）。**騎手変更・馬場変更の検知はここでは未対応**（`scores`テーブルが算出時の騎手コード等を
+  保持していないため）。公開直前の最終防衛はValidator（Issue #6）が担当する
+
+```
+KeibaDataCollector.exe content
+KeibaDataCollector.exe content 2026-08-30
+```
+
+WordPressへの実publishはまだ無い（コンソールへログ出力のみ。Issue #6 Validator・Issue #7
+Publisherで接続）。
 
 ## ビルドについて
 
