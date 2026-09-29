@@ -14,7 +14,9 @@
   （`WordPressClient.FindDigestPostIdAsync`が使用）
 - `GET /wp-json/keiba-ai/v1/settings` で自動公開ON/OFFを返す（`WordPressClient.IsAutoPublishEnabledAsync`
   がpublish前に毎回確認する）。`POST`（要管理者権限）で更新可能
-- 設定 → Keiba AI Digest 画面から自動公開ON/OFFを切り替え可能
+- `POST /wp-json/keiba-ai/v1/status`（要`edit_posts`権限、収集アプリのApplication Password想定）で
+  監視ダッシュボード（仕様書§17）のスナップショットを受け取り、`GET`（要管理者権限）で参照可能
+- 設定 → Keiba AI Digest 画面から自動公開ON/OFFの切り替え、および最新の監視ダッシュボードを確認可能
 
 ## 自動公開ON/OFFの既定値
 

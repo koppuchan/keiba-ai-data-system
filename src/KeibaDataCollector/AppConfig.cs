@@ -20,6 +20,15 @@ namespace KeibaDataCollector
         // license_gate を含む全テーブルを保持するSQLite。秘匿情報ではないため未設定でも起動できるよう既定値を持つ。
         public static string HistoricalDbPath => GetOrDefault("HistoricalDbPath", "data\\historical.sqlite3");
 
+        // 仕様書§15「通知」用のSMTP設定。すべて任意（NotifierServiceは未設定なら送信自体を行わない）。
+        public static string SmtpHost => GetOrDefault("SmtpHost", null);
+        public static int SmtpPort => int.Parse(GetOrDefault("SmtpPort", "587"));
+        public static bool SmtpUseSsl => bool.Parse(GetOrDefault("SmtpUseSsl", "true"));
+        public static string SmtpUser => GetOrDefault("SmtpUser", null);
+        public static string SmtpPassword => GetOrDefault("SmtpPassword", null);
+        public static string SmtpFrom => GetOrDefault("SmtpFrom", null);
+        public static string SmtpTo => GetOrDefault("SmtpTo", null);
+
         private static string Get(string key)
         {
             var value = GetOrDefault(key, null);

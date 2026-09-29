@@ -4,7 +4,7 @@
 同一構成のWindows常駐アプリ）を土台に、JRAVAN＋競馬最強の法則WEB 全自動AI競馬データシステム仕様書の
 各コンポーネントを追加していくプロジェクト。詳細は [`DEVELOPMENT_PLAN.md`](../../DEVELOPMENT_PLAN.md) を参照。
 
-## 現状（Issue #8まで: 既存機能のポート + LicenseGate + AI指数エンジン + Trend Engine + Content Generator + Validator + WordPress Publisher + レース後検証）
+## 現状（Issue #9まで: 既存機能のポート + LicenseGate + AI指数エンジン + Trend Engine + Content Generator + Validator + WordPress Publisher + レース後検証 + エラー処理・監視ダッシュボード）
 
 `horse-race-custom-builder` の実装をそのまま移植し、このリポジトリ単体で既存システムと同等の
 コマンド一式（`setup` / `morning` / `predict` / `score` / `watch` / `probe` / `backfill` / `dbstats`）
@@ -111,8 +111,8 @@ KeibaDataCollector.exe trend final     # 終了後、全当日結果で集計
   機械的にチェックする
 - 取消・除外馬は、`score`実行時点のスナップショットではなく**生成時点で当日データを読み直して**
   除外する（仕様書§11「取消・騎手変更・馬場変更が未反映なら公開停止または再計算」の取消・除外分に
-  対応）。**騎手変更・馬場変更の検知はここでは未対応**（`scores`テーブルが算出時の騎手コード等を
-  保持していないため）。公開直前の最終防衛はValidator（Issue #6）が担当する
+  対応）。騎手変更の検知はValidator（Issue #6、Issue #9で拡張）が`scores`テーブルの現在の
+  `jockey_code`と突き合わせて行う。**馬場変更（トラック種別・馬場状態の変化）の検知は未対応**
 
 ```
 KeibaDataCollector.exe content
@@ -123,10 +123,13 @@ KeibaDataCollector.exe content 2026-08-30
 
 `content`コマンド実行時、生成された各GeneratedPickは公開前に`ValidatorService`を必ず通る。
 
-- **DB再照合**: 生成時点で参照していたAI指数・血統登録番号を、今の`scores`テーブルの値と
-  突き合わせる。対象馬が取消・除外になっていたり、血統登録番号が一致しない（馬番の入れ替わり等）、
-  AI指数が許容誤差（±2.0）を超えて変化していれば不合格にする。**馬名での照合は未対応**
-  （表示名を持つマスタテーブルがまだ無いため、より強い一意キーであるketto_numで代用している）
+- **DB再照合**: 生成時点で参照していたAI指数・血統登録番号・騎手コードを、今の`scores`テーブルの
+  値と突き合わせる。対象馬が取消・除外になっていたり、血統登録番号が一致しない（馬番の入れ替わり等）、
+  AI指数が許容誤差（±2.0）を超えて変化していれば不合格にする。**騎手変更**（仕様書§15）も
+  ここで検知し不合格にする（即時の自動再計算はトリガーしない。`score`/`content`は1日に複数回の
+  再実行が前提の設計のため、次回実行で新しい騎手コードを反映した予測が自然に生成される）。
+  **馬名での照合は未対応**（表示名を持つマスタテーブルがまだ無いため、より強い一意キーである
+  ketto_numで代用している）
 - **LicenseGate本接続**: `LicenseGateStore.IsWebPublishAllowed(venueId, isCentral)` を呼び、
   この開催場が今Web公開してよい状態かを判定する。LicenseGate導入（Issue #1）以来、
   ここが初めての実接続先になる
@@ -182,6 +185,39 @@ KeibaDataCollector.exe verify
 KeibaDataCollector.exe verify 2026-08-30
 KeibaDataCollector.exe stats Nerai ai-index-v1
 KeibaDataCollector.exe stats AiIndexTop5 ai-index-v1
+```
+
+## エラー処理・監視ダッシュボード（仕様書§15・§17）
+
+仕様書§15のエラー処理表に対する対応状況:
+
+| エラー | 仕様書の処理 | 対応 |
+|---|---|---|
+| データ取得失敗 | 再試行→失敗なら公開停止＋通知 | JV-Link/UmaConnの読み取りは各サービスが例外を投げ、`Program.LogFailure`が監査ログへ記録（WordPress送信は元から自動再試行あり） |
+| 重要項目欠損 | 公開停止 | Validator（Issue #6）が対象馬未検出・AI指数算出不能を不合格にする |
+| 馬番不一致 | 公開停止 | Validatorが血統登録番号の不一致で不合格にする |
+| 騎手変更 | 再計算 | Validatorが`scores.jockey_code`との不一致を検知して公開停止（Issue #9で追加）。次回の`score`/`content`実行で自然に再計算される |
+| 取消/除外 | ランキングから除外 | AiIndexService/ContentGeneratorServiceが対応済み（Issue #3・#5） |
+| オッズ異常 | 穴馬判定停止 | `JvRecordParser.ParseTanshoOdds`が0円・非数値のオッズを除外済み、穴馬判定もオッズ未取得時は判定しない（Issue #5） |
+| AI生成失敗 | テンプレートへフォールバック/停止 | この実装はそもそも自由文生成AIを呼ばない（仕様書§14）ため、失敗しうるのは「対象馬なし」のみで、その場合は単にピックを生成しない |
+| WordPress API失敗 | 再試行＋通知 | `WordPressClient`が最大4回再試行済み（Issue #2）。再試行後も失敗すれば例外化し`LogFailure`経由で監査ログへ |
+| LicenseGate未承認 | 公開処理を強制停止 | `DigestPublisherService`/`ValidatorService`が対応済み（Issue #1・#6・#7） |
+
+「通知」は`AuditLogStore`（`audit_logs`テーブル）への記録が必須部分。加えて`NotifierService`が
+severity=Criticalのものだけベストエフォートでメール送信する（SMTP未設定なら送信自体を行わない）。
+`Program.LogFailure`はすべてのコマンドの例外処理が最終的に通る1箇所のため、ここに集約することで
+既存の各コマンドを個別に手直しせず横断的にエラーを記録している。成功時も`LogSuccess`で
+`audit_logs`へ記録し、「エラーが無い」と「一度も実行されていない」を区別できるようにしている。
+
+`dashboard`コマンドで仕様書§17の監視ダッシュボード項目（当日開催場、最終データ同期時刻、
+最終AI計算時刻、最終WordPress更新時刻、データソース接続状態、LicenseGate状態、未処理レース数、
+エラー件数、公開停止理由、自動公開ON/OFF）をコンソール表示し、WordPress側
+（`wordpress-plugin/keiba-ai-digest`の設定画面）へも送信する。「手動再実行」は運用手順の案内表示のみ
+（VPS上で対象のbatを再実行する既存の運用のまま）。
+
+```
+KeibaDataCollector.exe dashboard
+KeibaDataCollector.exe dashboard 2026-08-30
 ```
 
 ## ビルドについて

@@ -97,6 +97,7 @@ namespace KeibaDataCollector.Services
                     RaceNumber = raceNumber,
                     Umaban = s.Umaban,
                     KettoNum = s.KettoNum,
+                    JockeyCode = s.JockeyCode,
                     AiIndex = s.AiIndex,
                     DataCompleteness = s.DataCompleteness,
                     Factors = s.Factors,
@@ -140,6 +141,7 @@ namespace KeibaDataCollector.Services
                 AiIndexAtGeneration = best.AiIndex,
                 NinkiAtGeneration = best.Ninki,
                 TanshoOddsAtGeneration = best.TanshoOdds,
+                JockeyCodeAtGeneration = best.JockeyCode,
             };
         }
 
@@ -175,6 +177,7 @@ namespace KeibaDataCollector.Services
                 AiIndexAtGeneration = best.AiIndex,
                 NinkiAtGeneration = best.Ninki,
                 TanshoOddsAtGeneration = best.TanshoOdds,
+                JockeyCodeAtGeneration = best.JockeyCode,
             };
         }
 
@@ -206,6 +209,7 @@ namespace KeibaDataCollector.Services
                     AiIndexAtGeneration = c.AiIndex,
                     NinkiAtGeneration = c.Ninki,
                     TanshoOddsAtGeneration = c.TanshoOdds,
+                    JockeyCodeAtGeneration = c.JockeyCode,
                 });
             }
             return result;
