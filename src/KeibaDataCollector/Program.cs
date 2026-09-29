@@ -70,6 +70,15 @@ namespace KeibaDataCollector
                 }
                 return;
             }
+            if (mode == "stats")
+            {
+                using (var historical = new HistoricalDataStore(AppConfig.HistoricalDbPath))
+                using (var verificationStore = new VerificationStore(historical.Connection))
+                {
+                    RunStatsCommand(verificationStore, subArgs);
+                }
+                return;
+            }
 
             // WordPressClient はここでは作らない: setup モードはWordPressに一切繋がないため、
             // WordPressUser/WordPressAppPassword 未設定でも setup だけは実行できるようにする。
@@ -270,9 +279,30 @@ namespace KeibaDataCollector
                                 AppConfig.WordPressBaseUrl,
                                 AppConfig.WordPressUser,
                                 AppConfig.WordPressAppPassword);
-                            var publisher = new DigestPublisherService(wp, licenseGateStore);
+                            var publisher = new DigestPublisherService(wp, licenseGateStore, predictionStore);
                             RunContentFor(jvLink, scoresStore, trendStore, validator, publisher, targetDate);
                             RunContentFor(umaConn, scoresStore, trendStore, validator, publisher, targetDate);
+                        }
+                        break;
+                    }
+
+                    case "verify":
+                    {
+                        // verify [yyyy-MM-dd]
+                        var targetDate = DateTime.Today;
+                        if (args.Length > 1 && DateTime.TryParseExact(args[1], "yyyy-MM-dd",
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            System.Globalization.DateTimeStyles.None, out var parsed))
+                        {
+                            targetDate = parsed;
+                        }
+
+                        using (var store = new HistoricalDataStore(AppConfig.HistoricalDbPath))
+                        using (var predictionStore = new PredictionStore(store.Connection))
+                        using (var verificationStore = new VerificationStore(store.Connection))
+                        {
+                            RunVerifyFor(jvLink, predictionStore, verificationStore, targetDate);
+                            RunVerifyFor(umaConn, predictionStore, verificationStore, targetDate);
                         }
                         break;
                     }
@@ -292,7 +322,7 @@ namespace KeibaDataCollector
 
         private static void PrintUsage()
         {
-            Console.WriteLine("使い方: KeibaDataCollector.exe [setup|morning|predict|score|watch|probe|backfill|dbstats|trend|content|licensegate|weights]");
+            Console.WriteLine("使い方: KeibaDataCollector.exe [setup|morning|predict|score|watch|probe|backfill|dbstats|trend|content|verify|licensegate|weights|stats]");
             Console.WriteLine("  setup       : 初回のみ。利用キー等をGUIダイアログで設定する。");
             Console.WriteLine("  morning     : 朝一バッチ。当日の出走表を取得しWordPressへ反映する。");
             Console.WriteLine("  predict     : 朝一オッズの人気順から予想印を生成しWordPressへ反映する。");
@@ -312,6 +342,10 @@ namespace KeibaDataCollector
             Console.WriteLine("              morning=過去データ+当日確定情報、live=開催中の当日結果逐次、final=終了後の全当日結果。");
             Console.WriteLine("  content     : 本日の狙い馬・穴馬・危険な人気馬を生成する（要:事前のscore実行）。");
             Console.WriteLine("              content [yyyy-MM-dd]");
+            Console.WriteLine("  verify      : predictionsを確定着順と突き合わせてverificationへ記録する。");
+            Console.WriteLine("              verify [yyyy-MM-dd]");
+            Console.WriteLine("  stats       : 指数帯別の3着内率・勝率を表示する（要:事前のverify実行）。");
+            Console.WriteLine("              stats <Nerai|Ana|Kiken|AiIndexTop5> <modelVersion>");
             Console.WriteLine("  licensegate : LicenseGate（公開許諾状態）の確認・更新。詳細は `licensegate` (引数なし) 実行。");
             Console.WriteLine("  weights     : AI指数6ファクターの重み設定の確認・更新。詳細は `weights` (引数なし) 実行。");
         }
@@ -529,6 +563,34 @@ namespace KeibaDataCollector
             }
         }
 
+        private static void RunVerifyFor(JvSpecComDataSource source, PredictionStore predictionStore, VerificationStore verificationStore, DateTime targetDate)
+        {
+            try
+            {
+                source.Initialize(AppConfig.JvLinkSoftwareId);
+
+                var venues = RaceDiscovery.ForDate(source, targetDate)
+                    .Select(k => k.TrackCode).Distinct().ToList();
+                if (venues.Count == 0)
+                {
+                    Console.WriteLine($"[{source.SourceName}] {targetDate:yyyy-MM-dd} 該当開催場なし。");
+                    return;
+                }
+
+                var verifier = new VerificationService(source, predictionStore, verificationStore);
+                foreach (var trackCode in venues)
+                {
+                    var summary = verifier.VerifyVenue(targetDate, trackCode);
+                    Console.WriteLine($"[{source.SourceName}] {targetDate:yyyy-MM-dd} 場={trackCode} " +
+                        $"検証: 対象{summary.TotalPredictions}件 新規検証{summary.Verified}件 未確定{summary.StillPending}件");
+                }
+            }
+            catch (Exception ex)
+            {
+                LogFailure(source.SourceName, "レース後検証に失敗（このソースのみスキップして続行）", ex);
+            }
+        }
+
         // 監視が例外で落ちたときの再開待ち時間。
         private static readonly TimeSpan WatchRetryDelay = TimeSpan.FromMinutes(3);
 
@@ -724,6 +786,37 @@ namespace KeibaDataCollector
             Console.WriteLine("  KeibaDataCollector.exe weights set <segment> <bias> <pace> <agariQ> <jockeyRoi> <pedigreeFit> <trainingAcc>");
             Console.WriteLine("  segment例: default / central / local / central:turf / central:dirt / local:turf / local:dirt");
             Console.WriteLine("  未設定のsegmentを照会するとdefaultにフォールバックし、defaultも無ければ全項目1.0を返します。");
+        }
+
+        // ---- stats（仕様書§18 指数帯別成績） ----
+
+        private static void RunStatsCommand(VerificationStore store, string[] args)
+        {
+            // stats <category> <modelVersion>
+            // category: Nerai / Ana / Kiken / AiIndexTop5
+            if (args.Length < 2)
+            {
+                Console.WriteLine("使い方: KeibaDataCollector.exe stats <Nerai|Ana|Kiken|AiIndexTop5> <modelVersion>");
+                Console.WriteLine($"  modelVersionの既定値（AI Scoring Engineの現行バージョン）: {AiIndexService.ModelVersion}");
+                return;
+            }
+
+            var category = args[0];
+            var modelVersion = args[1];
+            var bands = store.GetIndexBandStats(modelVersion, category);
+
+            if (bands.Count == 0)
+            {
+                Console.WriteLine($"[stats] category={category} model_version={modelVersion} の検証データがまだありません。");
+                return;
+            }
+
+            Console.WriteLine($"[stats] category={category} model_version={modelVersion}");
+            Console.WriteLine("  指数帯      母数   3着内率   勝率");
+            foreach (var b in bands)
+            {
+                Console.WriteLine($"  {b.BandLow,3}-{b.BandHigh,-3}    {b.SampleCount,4}   {b.Top3Rate,7:P1}  {b.WinRate,7:P1}");
+            }
         }
     }
 }

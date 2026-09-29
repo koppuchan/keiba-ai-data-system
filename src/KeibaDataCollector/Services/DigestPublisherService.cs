@@ -23,11 +23,13 @@ namespace KeibaDataCollector.Services
     {
         private readonly WordPressClient _wp;
         private readonly LicenseGateStore _licenseGate;
+        private readonly PredictionStore _predictions;
 
-        public DigestPublisherService(WordPressClient wp, LicenseGateStore licenseGate)
+        public DigestPublisherService(WordPressClient wp, LicenseGateStore licenseGate, PredictionStore predictions)
         {
             _wp = wp;
             _licenseGate = licenseGate;
+            _predictions = predictions;
         }
 
         public async Task<PublishOutcome> PublishAsync(
@@ -65,10 +67,44 @@ namespace KeibaDataCollector.Services
             if (!payload.HasAnyContent)
                 return PublishOutcome.Skipped("公開対象のコンテンツが1件もありません（AI指数TOP5・傾向・ピックすべて空）。");
 
+            // AI指数TOP5も仕様書§18のレース後自動検証（Issue #8）の対象にするため、公開するものは
+            // predictionsへimmutableにsnapshotしておく。狙い馬/穴馬/危険な人気馬はIssue #6の
+            // ValidatorService.ValidateAndSnapshotで既にsnapshot済みだが、AI指数TOP5にはこれまで
+            // snapshotの機会が無かった（Validatorを経由しない。TOP5は「生成→後で再照合」ではなく
+            // 「今のDBの値をそのまま出す」ものなので、Validator相当のDB再照合は不要と判断し、
+            // ここで直接snapshotする）。
+            if (top5 != null)
+            {
+                foreach (var t in top5)
+                    SnapshotAiIndexTop5(t, licenseVisible);
+            }
+
             var published = await _wp.UpsertDigestAsync(payload);
             return published
                 ? PublishOutcome.Published(passedPicks.Count, blockedCount)
                 : PublishOutcome.Skipped("送信条件を満たさず見送りました。");
+        }
+
+        private void SnapshotAiIndexTop5(AiIndexResult t, bool licenseVisible)
+        {
+            _predictions.Insert(new PredictionRecord
+            {
+                PredictionId = Guid.NewGuid().ToString("N"),
+                RaceDate = t.RaceDate,
+                TrackCode = t.TrackCode,
+                RaceNumber = t.RaceNumber,
+                Umaban = t.Umaban,
+                KettoNum = t.KettoNum,
+                Category = "AiIndexTop5",
+                ContentText = $"AI指数TOP5: {t.RaceNumber}R {t.Umaban}番 指数{t.AiIndex:0.1}",
+                Reasons = new List<string> { $"ai_index={t.AiIndex:0.00}", $"data_completeness={t.DataCompleteness:0.00}" },
+                AiIndexSnapshot = t.AiIndex,
+                ModelVersion = t.ModelVersion,
+                LicenseCheckPassed = licenseVisible,
+                ValidatorPassed = true, // TOP5は現在のDB値そのものを公開するため、再照合の概念が無い。
+                ValidatorNotes = null,
+                CreatedAtUtc = DateTime.UtcNow,
+            });
         }
     }
 
