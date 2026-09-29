@@ -106,6 +106,54 @@ namespace KeibaDataCollector.Data
                 });
         }
 
+        /// <summary>ある開催場・日の予測（狙い馬/穴馬/危険な人気馬/AI指数TOP5すべて）を全件返す。
+        /// 「latest」等での絞り込みは行わない。同じ馬が当日中に複数回予測対象になった場合、
+        /// それぞれが別のprediction_idを持つ別行のままレース後検証（Issue #8）の対象になる
+        /// （仕様書§18「不的中データも削除せず全件検証に含める」の対象を、再生成で増えた行も
+        /// 含めて素直に全件とする解釈）。</summary>
+        public System.Collections.Generic.List<PredictionRecord> GetForVenue(DateTime raceDate, string trackCode)
+        {
+            var result = new System.Collections.Generic.List<PredictionRecord>();
+            using (var cmd = new SQLiteCommand(@"
+                SELECT prediction_id, race_date, track_code, race_number, umaban, ketto_num,
+                       category, content_text, reasons_json, ai_index_snapshot, ninki_snapshot,
+                       tansho_odds_snapshot, model_version, license_check_passed, validator_passed,
+                       validator_notes, created_at_utc
+                FROM predictions
+                WHERE race_date=@date AND track_code=@track;", _conn))
+            {
+                cmd.Parameters.AddWithValue("@date", raceDate.ToString("yyyy-MM-dd"));
+                cmd.Parameters.AddWithValue("@track", trackCode);
+                using (var r = cmd.ExecuteReader())
+                {
+                    while (r.Read())
+                    {
+                        result.Add(new PredictionRecord
+                        {
+                            PredictionId = r.GetString(0),
+                            RaceDate = DateTime.Parse(r.GetString(1)),
+                            TrackCode = r.GetString(2),
+                            RaceNumber = r.GetInt32(3),
+                            Umaban = r.GetInt32(4),
+                            KettoNum = r.IsDBNull(5) ? null : r.GetString(5),
+                            Category = r.GetString(6),
+                            ContentText = r.GetString(7),
+                            Reasons = JsonConvert.DeserializeObject<System.Collections.Generic.List<string>>(r.GetString(8)) ?? new System.Collections.Generic.List<string>(),
+                            AiIndexSnapshot = r.IsDBNull(9) ? (double?)null : r.GetDouble(9),
+                            NinkiSnapshot = r.IsDBNull(10) ? (int?)null : r.GetInt32(10),
+                            TanshoOddsSnapshot = r.IsDBNull(11) ? (double?)null : r.GetDouble(11),
+                            ModelVersion = r.IsDBNull(12) ? null : r.GetString(12),
+                            LicenseCheckPassed = r.GetInt32(13) != 0,
+                            ValidatorPassed = r.GetInt32(14) != 0,
+                            ValidatorNotes = r.IsDBNull(15) ? null : r.GetString(15),
+                            CreatedAtUtc = DateTime.Parse(r.GetString(16)),
+                        });
+                    }
+                }
+            }
+            return result;
+        }
+
         private void Exec(string sql, Action<SQLiteParameterCollection> bind = null)
         {
             using (var cmd = new SQLiteCommand(sql, _conn))

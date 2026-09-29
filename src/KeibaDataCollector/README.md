@@ -4,7 +4,7 @@
 同一構成のWindows常駐アプリ）を土台に、JRAVAN＋競馬最強の法則WEB 全自動AI競馬データシステム仕様書の
 各コンポーネントを追加していくプロジェクト。詳細は [`DEVELOPMENT_PLAN.md`](../../DEVELOPMENT_PLAN.md) を参照。
 
-## 現状（Issue #7まで: 既存機能のポート + LicenseGate + AI指数エンジン + Trend Engine + Content Generator + Validator + WordPress Publisher）
+## 現状（Issue #8まで: 既存機能のポート + LicenseGate + AI指数エンジン + Trend Engine + Content Generator + Validator + WordPress Publisher + レース後検証）
 
 `horse-race-custom-builder` の実装をそのまま移植し、このリポジトリ単体で既存システムと同等の
 コマンド一式（`setup` / `morning` / `predict` / `score` / `watch` / `probe` / `backfill` / `dbstats`）
@@ -156,6 +156,33 @@ WordPress側の対応プラグインは新規
 （LicenseGateと同じフェイルクローズ方針）。§13の「手動再実行」は、VPS上で`run-score.bat`/
 `run-content.bat`を対象日指定で再実行する運用のままにしている（WordPress側からVPSの処理を
 起動する経路は、攻撃面を増やさないため意図的に作っていない）。
+
+## レース後の自動検証（仕様書§18 Verification DB）
+
+`verify`コマンドで、`predictions`テーブル（狙い馬/穴馬/危険な人気馬はIssue #6のValidator、
+AI指数TOP5はIssue #7のDigestPublisherが、それぞれ公開のタイミングでimmutableにsnapshot済み）を
+当日の確定着順と突き合わせ、`verification`テーブルへ記録する。
+
+- 確定着順は当日のSEレコードを直接読んで得る（historical.sqlite3への当日結果の反映はリアルタイムでは
+  ないため、TrendEngine/ContentGeneratorと同じ理由で当日データを直接読む）
+- **Validator不合格（非公開）だった予測は検証対象にしない**。公開していない予測の的中率を集計しても
+  意味が無いため
+- Validator合格分は**的中・不的中を問わずすべて検証対象にする**（仕様書§18「不的中データも削除せず
+  全件検証に含める」）。同じ馬が当日中に複数回ピックされた場合はその回数分だけ別々に検証される
+  （predictionsが再生成のたびに新しい行を追加する設計のため。既存行を書き換えたり間引いたりしない）
+- `verification`テーブルへの書き込みはUpsertだが、書き換えているのは「まだ未確定だった行を確定させる」
+  場合のみで、確定済みの結果を後から変えることはない（`verify`を複数回実行しても同じ入力なら同じ
+  出力に収束する冪等な操作という位置づけ）
+
+`stats`コマンドで、AI指数を10点刻みの帯に分けた3着内率・勝率を確認できる（仕様書§18「指数帯別成績を
+model_versionごとに分離」）。
+
+```
+KeibaDataCollector.exe verify
+KeibaDataCollector.exe verify 2026-08-30
+KeibaDataCollector.exe stats Nerai ai-index-v1
+KeibaDataCollector.exe stats AiIndexTop5 ai-index-v1
+```
 
 ## ビルドについて
 
