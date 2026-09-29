@@ -4,7 +4,7 @@
 同一構成のWindows常駐アプリ）を土台に、JRAVAN＋競馬最強の法則WEB 全自動AI競馬データシステム仕様書の
 各コンポーネントを追加していくプロジェクト。詳細は [`DEVELOPMENT_PLAN.md`](../../DEVELOPMENT_PLAN.md) を参照。
 
-## 現状（Issue #6まで: 既存機能のポート + LicenseGate + AI指数エンジン + Trend Engine + Content Generator + Validator）
+## 現状（Issue #7まで: 既存機能のポート + LicenseGate + AI指数エンジン + Trend Engine + Content Generator + Validator + WordPress Publisher）
 
 `horse-race-custom-builder` の実装をそのまま移植し、このリポジトリ単体で既存システムと同等の
 コマンド一式（`setup` / `morning` / `predict` / `score` / `watch` / `probe` / `backfill` / `dbstats`）
@@ -68,8 +68,8 @@ KeibaDataCollector.exe weights show central:turf
 KeibaDataCollector.exe weights set central:turf 1.2 1.0 1.0 1.5 0.8 1.0
 ```
 
-WordPressへのAI指数TOP5の実publishはまだ無い（算出結果はscoreコマンド実行時にコンソールへログ出力
-されるのみ）。Content Generator（Issue #5）・WordPress Publisher拡張（Issue #7）で接続する。
+`score`コマンド実行時点ではまだWordPressへ送らず、コンソールへログ出力するのみ。実際の公開は
+`content`コマンド実行時に`DigestPublisherService`がまとめて行う（後述のWordPress Publisher拡張参照）。
 
 ## Trend Engine（仕様書§10 本日の傾向）
 
@@ -91,7 +91,9 @@ KeibaDataCollector.exe trend final     # 終了後、全当日結果で集計
   保存していないため、母集団が無い。`SampleCount=0`のまま返す（捏造しない）。`live`/`final`は
   当日データを直接読むため、この制約を受けずに算出できる
 
-WordPressへの本日の傾向の実publishはまだ無い（Content Generator/Publisher拡張で接続）。
+`trend`コマンド実行時点ではまだWordPressへ送らない。`morning`/`live`/`final`いずれの段階も
+`trend_snapshots`に保存されるだけで、`content`コマンド実行時にその時点で保存済みの最新スナップショットを
+`DigestPublisherService`がまとめて公開する（後述）。
 
 ## Content Generator（仕様書§11 今日の狙い馬・穴馬・危険な人気馬）
 
@@ -117,8 +119,6 @@ KeibaDataCollector.exe content
 KeibaDataCollector.exe content 2026-08-30
 ```
 
-WordPressへの実publishはまだ無い（コンソールへログ出力のみ。Issue #7 Publisherで接続）。
-
 ## Validator（仕様書§14・§5 LicenseGate本接続）
 
 `content`コマンド実行時、生成された各GeneratedPickは公開前に`ValidatorService`を必ず通る。
@@ -135,9 +135,27 @@ WordPressへの実publishはまだ無い（コンソールへログ出力のみ�
   「公開停止理由」はここが情報源になる想定）。既存行を書き換えるAPIは`PredictionStore`に
   意図的に用意していない
 
-WordPress公開そのもの（Issue #7）は、この`ValidatorService.Passed`を見て初めて実行される設計にする。
-AI指数TOP5・本日の傾向（Trend Engine）の公開経路には、Issue #7でPublisherを実装する際にまとめて
-LicenseGate/Validatorを通す（公開処理そのものがまだ無いため、現時点では接続先がない）。
+## WordPress Publisher拡張（仕様書§13、および§3のAI指数TOP5・本日の傾向の公開）
+
+`content`コマンドは、狙い馬・穴馬・危険な人気馬の生成・検証まで終えると、続けてその開催場のAI指数
+TOP5（`ScoresStore.GetVenueTop5`）・本日の傾向（`TrendStore`の朝/開催中/終了後3段階）・Validator
+通過済みピックを1つにまとめ、WordPressの新規カスタム投稿タイプ`keiba_digest`（`race`投稿とは別、
+1開催場・1日単位）へ`DigestPublisherService`経由でidempotentに公開する。
+
+公開直前のゲートは`DigestPublisherService`に集約している。
+1. **LicenseGate**: `IsWebPublishAllowed`が通らない開催場は送信自体を行わない
+2. **自動公開ON/OFF**: WordPress管理画面（設定 → Keiba AI Digest）のチェックボックスと連動。
+   `WordPressClient.IsAutoPublishEnabledAsync`が毎回確認し、取得失敗時も安全側でOFF扱いにする
+3. **Validator未通過ピックの除外**: `content`コマンド内で既にIssue #6のValidatorを通している。
+   不合格だったピックはpublish対象に含めない
+4. **空コンテンツなら送信しない**: AI指数TOP5・傾向・ピックが全て空ならWordPressへ何も送らない
+   （仕様書§13「更新失敗時に空ページ・壊れたページを出さない」と同じ考え方をpublish要否にも適用）
+
+WordPress側の対応プラグインは新規
+[`wordpress-plugin/keiba-ai-digest/`](../wordpress-plugin/keiba-ai-digest/)。**自動公開の既定値はOFF**
+（LicenseGateと同じフェイルクローズ方針）。§13の「手動再実行」は、VPS上で`run-score.bat`/
+`run-content.bat`を対象日指定で再実行する運用のままにしている（WordPress側からVPSの処理を
+起動する経路は、攻撃面を増やさないため意図的に作っていない）。
 
 ## ビルドについて
 
