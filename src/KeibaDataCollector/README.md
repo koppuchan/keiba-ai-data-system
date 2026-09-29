@@ -89,10 +89,10 @@ KeibaDataCollector.exe trend final     # 終了後、全当日結果で集計
 - 最低サンプル数（脚質・枠・上がり=20、通過順=10。レース単位の指標のため少なめ）未満の集計は
   断定的な値（先行有利/差し有利等）を出さず、サンプル数だけを保持する
 - 天候・馬場状態は常に当日のRACEデータから直接読む（開催中に馬場状態が変わることがあるため）
-- **既知の制約**: `morning`段階の通過順傾向（最終コーナー先頭馬の勝率）は算出できない。
-  `BackfillService`が過去分のコーナー通過順（`race_entries.CornerPassage4`）を意図的に
-  保存していないため、母集団が無い。`SampleCount=0`のまま返す（捏造しない）。`live`/`final`は
-  当日データを直接読むため、この制約を受けずに算出できる
+- `morning`段階の通過順傾向（最終コーナー先頭馬の勝率）は`race_entries.final_corner_leader`列
+  （Issue #12で追加。`BackfillService`が最終コーナー通過順位から算出して保存する）を母集団にする。
+  この列が無い旧DB・再backfill前の行は対象から自然に除外されるため、`run-backfill.bat`を
+  再実行していない環境ではサンプル数が少なく出る点に注意
 
 `trend`コマンド実行時点ではまだWordPressへ送らない。`morning`/`live`/`final`いずれの段階も
 `trend_snapshots`に保存されるだけで、`content`コマンド実行時にその時点で保存済みの最新スナップショットを

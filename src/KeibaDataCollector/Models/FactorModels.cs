@@ -33,6 +33,12 @@ namespace KeibaDataCollector.Models
         /// RAレコードのコーナー通過順位（Jyuni）テキストから算出する（BackfillService参照）。</summary>
         public double? EarlyPositionRatio { get; set; }
 
+        /// <summary>最終コーナーを先頭で通過していたか。Trend Engine（仕様書§10）の朝段階
+        /// 通過順傾向（最終コーナー先頭馬の勝率）の母集団に使う。コーナー通過順位が取得できな
+        /// かったレース（配列が空・当該馬の馬番が見つからない等）はnull（不明）のままにし、
+        /// falseと区別する（「先頭でなかった」と「分からない」を混同しない）。</summary>
+        public bool? IsFinalCornerLeader { get; set; }
+
         /// <summary>複勝払戻金額（100円あたり）。3着以内に入っていなければ0。
         /// HR（払戻）レコードから別途反映する。単勝回収率はTanshoOdds×(Chakujun==1)で
         /// 計算できるが、複勝回収率にはこの実払戻額が必要
