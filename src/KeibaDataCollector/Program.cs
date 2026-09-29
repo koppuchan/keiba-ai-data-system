@@ -260,9 +260,12 @@ namespace KeibaDataCollector
 
                         using (var store = new HistoricalDataStore(AppConfig.HistoricalDbPath))
                         using (var scoresStore = new ScoresStore(store.Connection))
+                        using (var licenseGateStore = new LicenseGateStore(store.Connection))
+                        using (var predictionStore = new PredictionStore(store.Connection))
                         {
-                            RunContentFor(jvLink, scoresStore, targetDate);
-                            RunContentFor(umaConn, scoresStore, targetDate);
+                            var validator = new ValidatorService(scoresStore, licenseGateStore, predictionStore);
+                            RunContentFor(jvLink, scoresStore, validator, targetDate);
+                            RunContentFor(umaConn, scoresStore, validator, targetDate);
                         }
                         break;
                     }
@@ -454,11 +457,12 @@ namespace KeibaDataCollector
             }
         }
 
-        private static void RunContentFor(JvSpecComDataSource source, ScoresStore scoresStore, DateTime targetDate)
+        private static void RunContentFor(JvSpecComDataSource source, ScoresStore scoresStore, ValidatorService validator, DateTime targetDate)
         {
             try
             {
                 source.Initialize(AppConfig.JvLinkSoftwareId);
+                var isCentral = source.SourceName.Contains("中央");
 
                 var venues = RaceDiscovery.ForDate(source, targetDate)
                     .Select(k => k.TrackCode).Distinct().ToList();
@@ -476,8 +480,25 @@ namespace KeibaDataCollector
                         $"狙い馬={picks.Count(p => p.Category == PickCategory.Nerai)}件 " +
                         $"穴馬={picks.Count(p => p.Category == PickCategory.Ana)}件 " +
                         $"危険な人気馬={picks.Count(p => p.Category == PickCategory.Kiken)}件");
+
+                    int passed = 0, blocked = 0;
                     foreach (var pick in picks)
-                        Console.WriteLine($"    [{pick.Category}] {pick.Text}");
+                    {
+                        var outcome = validator.ValidateAndSnapshot(pick, isCentral);
+                        if (outcome.Passed)
+                        {
+                            passed++;
+                            Console.WriteLine($"    [OK] [{pick.Category}] {pick.Text}");
+                        }
+                        else
+                        {
+                            blocked++;
+                            Console.WriteLine($"    [公開停止] [{pick.Category}] {pick.Text}");
+                            foreach (var note in outcome.Notes)
+                                Console.WriteLine($"        - {note}");
+                        }
+                    }
+                    Console.WriteLine($"[{source.SourceName}] {targetDate:yyyy-MM-dd} 場={trackCode} Validator結果: 公開可={passed}件 公開停止={blocked}件");
                 }
             }
             catch (Exception ex)
