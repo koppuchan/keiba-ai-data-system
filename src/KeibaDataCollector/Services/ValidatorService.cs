@@ -58,6 +58,7 @@ namespace KeibaDataCollector.Services
                 RaceNumber = pick.Race.RaceNumber,
                 Umaban = pick.Umaban,
                 KettoNum = pick.KettoNum,
+                JockeyCode = pick.JockeyCodeAtGeneration,
                 Category = pick.Category.ToString(),
                 ContentText = pick.Text,
                 Reasons = pick.Reasons,
@@ -118,6 +119,20 @@ namespace KeibaDataCollector.Services
                     ok = false;
                     notes.Add($"AI指数が生成時（{pick.AiIndexAtGeneration:0.00}）から現在（{current.AiIndex:0.00}）へ許容誤差を超えて変化しています。");
                 }
+            }
+
+            // 仕様書§15「騎手変更→再計算」。ここでは検知のみ行い公開停止にする。
+            // 「再計算」自体は、score/contentコマンドが冪等かつ1日に何度も再実行される前提の
+            // 設計になっているため、次回の定期実行で新しい騎手コードを反映した予測が
+            // 自然に生成される（自動で即時再計算をその場でトリガーする作りにはしていない。
+            // JV-Link/UmaConnの再取得は数十秒〜のオーダーで、Validator実行のたびに
+            // 割り込ませるとcontentコマンド全体の実行時間が不安定になるため）。
+            if (!string.IsNullOrEmpty(pick.JockeyCodeAtGeneration) && !string.IsNullOrEmpty(current.JockeyCode)
+                && pick.JockeyCodeAtGeneration != current.JockeyCode)
+            {
+                ok = false;
+                notes.Add($"騎手が生成時（{pick.JockeyCodeAtGeneration}）から現在（{current.JockeyCode}）へ変更されています。" +
+                          "次回のscore/content実行で新しい騎手を反映して再計算されます。");
             }
 
             return ok;

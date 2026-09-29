@@ -172,6 +172,41 @@ add_action('rest_api_init', function () {
             return array('autoPublishEnabled' => $enabled);
         },
     ));
+
+    // 仕様書§17監視ダッシュボード。KeibaDataCollectorの`dashboard`コマンドがPOSTで送信し、
+    // 管理画面（設定 > Keiba AI Digest）で最新状態を表示する。
+    // 認証は他のREST書き込み（register_post_metaのauth_callback）と同じ edit_posts に揃えている
+    // （収集アプリのApplication Passwordユーザーが管理者権限を持つとは限らないため）。
+    register_rest_route('keiba-ai/v1', '/status', array(
+        'methods' => 'POST',
+        'permission_callback' => function () {
+            return current_user_can('edit_posts');
+        },
+        'callback' => function (WP_REST_Request $request) {
+            $body = $request->get_json_params();
+            if (!is_array($body)) {
+                return new WP_Error('invalid_body', 'JSON body required', array('status' => 400));
+            }
+            // 値は検証せずそのまま保存する。ここは収集アプリ（認証済み）専用の内部ステータスで、
+            // 表示は管理画面のみ・一般公開はしないため。
+            update_option('keiba_ai_digest_last_status', $body);
+            update_option('keiba_ai_digest_last_status_at', current_time('mysql', true));
+            return array('ok' => true);
+        },
+    ));
+
+    register_rest_route('keiba-ai/v1', '/status', array(
+        'methods' => 'GET',
+        'permission_callback' => function () {
+            return current_user_can('manage_options');
+        },
+        'callback' => function () {
+            return array(
+                'status' => get_option('keiba_ai_digest_last_status', null),
+                'receivedAt' => get_option('keiba_ai_digest_last_status_at', null),
+            );
+        },
+    ));
 });
 
 /**
@@ -232,6 +267,57 @@ function keiba_ai_digest_render_settings_page()
             <code>run-score.bat</code> / <code>run-content.bat</code> を対象日を指定して再実行してください。
             このプラグインからVPS上の処理を起動する経路は用意していません。
         </p>
+
+        <h2>監視ダッシュボード（仕様書§17）</h2>
+        <?php keiba_ai_digest_render_status(); ?>
     </div>
     <?php
+}
+
+/**
+ * KeibaDataCollectorの`dashboard`コマンドが最後にPOSTしてきたステータスを表示する。
+ * 一度も送信されていなければその旨を表示するだけで、エラーにはしない
+ * （収集アプリを未導入・`dashboard`未実行のままプラグインだけ入れている状態は正常にありうる）。
+ */
+function keiba_ai_digest_render_status()
+{
+    $status = get_option('keiba_ai_digest_last_status', null);
+    $receivedAt = get_option('keiba_ai_digest_last_status_at', null);
+
+    if (!is_array($status)) {
+        echo '<p>まだ収集アプリから監視データを受信していません。VPS上で <code>KeibaDataCollector.exe dashboard</code> を実行してください。</p>';
+        return;
+    }
+
+    echo '<p>最終受信（UTC）: ' . esc_html($receivedAt) . '</p>';
+    echo '<table class="widefat" style="max-width:800px">';
+    $rows = array(
+        '対象日' => isset($status['raceDate']) ? $status['raceDate'] : '-',
+        '当日開催場' => isset($status['venuesWithData']) ? implode(', ', (array) $status['venuesWithData']) : '-',
+        '最終データ同期' => isset($status['lastDataSyncUtc']) ? $status['lastDataSyncUtc'] : '-',
+        '最終AI計算' => isset($status['lastAiComputeUtc']) ? $status['lastAiComputeUtc'] : '-',
+        '最終WordPress更新' => isset($status['lastWordPressPublishUtc']) ? $status['lastWordPressPublishUtc'] : '-',
+        '未処理レース数' => isset($status['unprocessedRaceCount']) ? $status['unprocessedRaceCount'] : '-',
+        '自動公開' => !empty($status['autoPublishEnabled']) ? 'ON' : 'OFF',
+    );
+    foreach ($rows as $label => $value) {
+        echo '<tr><th style="text-align:left;width:200px">' . esc_html($label) . '</th><td>' . esc_html($value) . '</td></tr>';
+    }
+    echo '</table>';
+
+    if (!empty($status['errorCountLast24h']) && is_array($status['errorCountLast24h'])) {
+        echo '<h3>エラー件数（直近24時間）</h3><ul>';
+        foreach ($status['errorCountLast24h'] as $severity => $count) {
+            echo '<li>' . esc_html($severity) . ': ' . esc_html($count) . '件</li>';
+        }
+        echo '</ul>';
+    }
+
+    if (!empty($status['publishBlockedReasons']) && is_array($status['publishBlockedReasons'])) {
+        echo '<h3>公開停止理由（本日）</h3><ul>';
+        foreach ($status['publishBlockedReasons'] as $reason) {
+            echo '<li>' . esc_html($reason) . '</li>';
+        }
+        echo '</ul>';
+    }
 }

@@ -34,7 +34,7 @@ namespace KeibaDataCollector
                 // ここまで漏れてくるのは設定不備など、処理を始める前の失敗。
                 // 未処理例外のまま落とすと、サーバーではWindowsのエラー報告ダイアログが
                 // 出てタスクが終了しなくなる恐れがあるため、必ず捕まえて終了コードで返す。
-                LogFailure("起動", "処理を開始できませんでした", ex);
+                LogFailure("起動", "処理を開始できませんでした", ex, critical: true);
             }
 
             if (_hadFailure)
@@ -76,6 +76,41 @@ namespace KeibaDataCollector
                 using (var verificationStore = new VerificationStore(historical.Connection))
                 {
                     RunStatsCommand(verificationStore, subArgs);
+                }
+                return;
+            }
+            if (mode == "dashboard")
+            {
+                var targetDate = DateTime.Today;
+                if (subArgs.Length > 0 && DateTime.TryParseExact(subArgs[0], "yyyy-MM-dd",
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None, out var parsed))
+                {
+                    targetDate = parsed;
+                }
+
+                using (var historical = new HistoricalDataStore(AppConfig.HistoricalDbPath))
+                using (var licenseGateStore = new LicenseGateStore(historical.Connection))
+                using (var auditLog = new AuditLogStore(historical.Connection))
+                {
+                    var wp = new WordPressClient(
+                        AppConfig.WordPressBaseUrl,
+                        AppConfig.WordPressUser,
+                        AppConfig.WordPressAppPassword);
+                    var monitoring = new MonitoringService(historical.Connection, licenseGateStore, auditLog, wp);
+                    var snapshot = monitoring.BuildSnapshotAsync(targetDate).GetAwaiter().GetResult();
+                    PrintDashboard(snapshot);
+
+                    // 仕様書§17監視ダッシュボードはWordPress管理画面でも確認できるようにする
+                    // （VPSにSSHできない関係者向け）。送信失敗はダッシュボード表示自体を止めない。
+                    try
+                    {
+                        wp.PushStatusAsync(snapshot).GetAwaiter().GetResult();
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[dashboard] WordPressへのステータス送信に失敗しました（表示は上記の通り取得済み）: {ex.Message}");
+                    }
                 }
                 return;
             }
@@ -322,7 +357,7 @@ namespace KeibaDataCollector
 
         private static void PrintUsage()
         {
-            Console.WriteLine("使い方: KeibaDataCollector.exe [setup|morning|predict|score|watch|probe|backfill|dbstats|trend|content|verify|licensegate|weights|stats]");
+            Console.WriteLine("使い方: KeibaDataCollector.exe [setup|morning|predict|score|watch|probe|backfill|dbstats|trend|content|verify|licensegate|weights|stats|dashboard]");
             Console.WriteLine("  setup       : 初回のみ。利用キー等をGUIダイアログで設定する。");
             Console.WriteLine("  morning     : 朝一バッチ。当日の出走表を取得しWordPressへ反映する。");
             Console.WriteLine("  predict     : 朝一オッズの人気順から予想印を生成しWordPressへ反映する。");
@@ -348,15 +383,59 @@ namespace KeibaDataCollector
             Console.WriteLine("              stats <Nerai|Ana|Kiken|AiIndexTop5> <modelVersion>");
             Console.WriteLine("  licensegate : LicenseGate（公開許諾状態）の確認・更新。詳細は `licensegate` (引数なし) 実行。");
             Console.WriteLine("  weights     : AI指数6ファクターの重み設定の確認・更新。詳細は `weights` (引数なし) 実行。");
+            Console.WriteLine("  dashboard   : 監視ダッシュボード（仕様書§17）をコンソール表示し、WordPressへも送信する。");
+            Console.WriteLine("              dashboard [yyyy-MM-dd]");
         }
 
         /// <summary>例外の内容をログに残す。原因調査には型と発生箇所が要るため、
         /// Messageだけでなく例外の全文（スタックトレース含む）を出す。</summary>
-        private static void LogFailure(string sourceName, string what, Exception ex)
+        private static void LogFailure(string sourceName, string what, Exception ex, bool critical = false)
         {
             _hadFailure = true;
-            Console.WriteLine($"[{sourceName}] {what}: {ex.GetType().Name}: {ex.Message}");
+            var summary = $"{what}: {ex.GetType().Name}: {ex.Message}";
+            Console.WriteLine($"[{sourceName}] {summary}");
             Console.WriteLine(ex.ToString());
+
+            // 仕様書§15「エラー処理」。ここまで来る例外はすべて監査ログへ記録する
+            // （§17監視ダッシュボードの「エラー件数」の情報源）。個別のコマンドを手直しせず、
+            // 全コマンドが最終的に通るこの1箇所から横断的に記録する。
+            // criticalは「バッチ全体が始まらなかった」等、運用者が即座に気付くべき場合のみtrueにし、
+            // それ以外（1レースだけの失敗等）はダッシュボードでの確認に留めてメール通知はしない
+            // （通知のたびにメールが飛ぶと、日常的に起きる軽微なスキップで警報が形骸化するため）。
+            try
+            {
+                using (var audit = new AuditLogStore(AppConfig.HistoricalDbPath))
+                {
+                    var notifier = new NotifierService(audit);
+                    notifier.Notify(
+                        critical ? NotifierService.SeverityCritical : NotifierService.SeverityError,
+                        sourceName, "エラー", summary);
+                }
+            }
+            catch (Exception auditEx)
+            {
+                // 監査ログ自体の書き込み失敗でバッチを止めない。
+                Console.WriteLine($"[AuditLogStore] 監査ログの記録に失敗: {auditEx.Message}");
+            }
+        }
+
+        /// <summary>成功時の監査ログ記録。MonitoringService（仕様書§17）がデータソースの
+        /// 「直近のイベントは正常だったか」を判定できるよう、失敗だけでなく成功も記録する
+        /// （LogFailureしか無いとaudit_logsが失敗しか含まなくなり、「エラーが無い」＝「正常」なのか
+        /// 「そもそも一度も実行されていない」なのかを区別できなくなる）。</summary>
+        private static void LogSuccess(string sourceName, string category, string message)
+        {
+            try
+            {
+                using (var audit = new AuditLogStore(AppConfig.HistoricalDbPath))
+                {
+                    audit.Log(NotifierService.SeverityInfo, sourceName, category, message);
+                }
+            }
+            catch (Exception auditEx)
+            {
+                Console.WriteLine($"[AuditLogStore] 監査ログの記録に失敗: {auditEx.Message}");
+            }
         }
 
         private static void RunProbeFor(JvSpecComDataSource source, string raceKeySlug = null)
@@ -430,6 +509,7 @@ namespace KeibaDataCollector
             {
                 source.Initialize(AppConfig.JvLinkSoftwareId);
                 new RaceCardService(source, wp).RunMorningBatch(DateTime.Today, trackCode: "");
+                LogSuccess(source.SourceName, "朝一バッチ", "正常終了");
             }
             catch (Exception ex)
             {
@@ -446,6 +526,7 @@ namespace KeibaDataCollector
                 new PredictionService(source, wp)
                     .RunAsync(DateTime.Today, CancellationToken.None)
                     .GetAwaiter().GetResult();
+                LogSuccess(source.SourceName, "予想生成", "正常終了");
             }
             catch (Exception ex)
             {
@@ -459,6 +540,7 @@ namespace KeibaDataCollector
             {
                 source.Initialize(AppConfig.JvLinkSoftwareId);
                 new FactorPublishService(source, wp, scoring, scoresStore).RunForToday(targetDate);
+                LogSuccess(source.SourceName, "AI指数算出", "正常終了");
             }
             catch (Exception ex)
             {
@@ -491,6 +573,7 @@ namespace KeibaDataCollector
                         $"枠サンプル合計={snapshot.PostPosition.ByWaku.Values.Sum(w => w.SampleCount)}, " +
                         $"上がりサンプル={snapshot.Agari.SampleCount}, 通過順サンプル={snapshot.Passage.SampleCount}");
                 }
+                LogSuccess(source.SourceName, "傾向算出", $"正常終了（{stage}）");
             }
             catch (Exception ex)
             {
@@ -556,6 +639,7 @@ namespace KeibaDataCollector
                         ? $"[{source.SourceName}] {targetDate:yyyy-MM-dd} 場={trackCode} WordPress公開完了（ピック{publishOutcome.PublishedPickCount}件、公開停止{publishOutcome.BlockedPickCount}件）"
                         : $"[{source.SourceName}] {targetDate:yyyy-MM-dd} 場={trackCode} WordPress公開を見送り: {publishOutcome.SkipReason}");
                 }
+                LogSuccess(source.SourceName, "コンテンツ生成・公開", "正常終了");
             }
             catch (Exception ex)
             {
@@ -584,6 +668,7 @@ namespace KeibaDataCollector
                     Console.WriteLine($"[{source.SourceName}] {targetDate:yyyy-MM-dd} 場={trackCode} " +
                         $"検証: 対象{summary.TotalPredictions}件 新規検証{summary.Verified}件 未確定{summary.StillPending}件");
                 }
+                LogSuccess(source.SourceName, "レース後検証", "正常終了");
             }
             catch (Exception ex)
             {
@@ -818,5 +903,44 @@ namespace KeibaDataCollector
                 Console.WriteLine($"  {b.BandLow,3}-{b.BandHigh,-3}    {b.SampleCount,4}   {b.Top3Rate,7:P1}  {b.WinRate,7:P1}");
             }
         }
+
+        // ---- dashboard（仕様書§17 監視ダッシュボード） ----
+
+        private static void PrintDashboard(MonitoringSnapshot s)
+        {
+            Console.WriteLine($"=== 監視ダッシュボード {s.RaceDate:yyyy-MM-dd}（生成: {s.GeneratedAtUtc:u}） ===");
+
+            Console.WriteLine($"当日開催場（データあり）: {(s.VenuesWithData.Count > 0 ? string.Join(", ", s.VenuesWithData) : "なし")}");
+            Console.WriteLine($"最終データ同期時刻: {Fmt(s.LastDataSyncUtc)}");
+            Console.WriteLine($"最終AI計算時刻: {Fmt(s.LastAiComputeUtc)}");
+            Console.WriteLine($"最終WordPress更新時刻: {Fmt(s.LastWordPressPublishUtc)}");
+
+            Console.WriteLine("データソース接続状態:");
+            foreach (var kv in s.DataSourceStatus)
+                Console.WriteLine($"  {kv.Key}: {kv.Value}");
+
+            Console.WriteLine($"LicenseGate: JRA={(s.JraLicenseVisible ? "公開可" : "公開停止")}");
+            foreach (var (venueId, visible) in s.LocalVenueLicenseVisible)
+                Console.WriteLine($"  地方 {venueId}: {(visible ? "公開可" : "公開停止")}");
+
+            Console.WriteLine($"未処理レース数（score済みだがcontent未実行）: {s.UnprocessedRaceCount}");
+
+            Console.WriteLine("エラー件数（直近24時間）:");
+            if (s.ErrorCountLast24h.Count == 0)
+                Console.WriteLine("  なし");
+            foreach (var kv in s.ErrorCountLast24h)
+                Console.WriteLine($"  {kv.Key}: {kv.Value}件");
+
+            Console.WriteLine($"公開停止理由（本日、重複除去）:");
+            if (s.PublishBlockedReasons.Count == 0)
+                Console.WriteLine("  なし");
+            foreach (var reason in s.PublishBlockedReasons)
+                Console.WriteLine($"  - {reason}");
+
+            Console.WriteLine($"自動公開: {(s.AutoPublishEnabled ? "ON" : "OFF")}");
+            Console.WriteLine("手動再実行: run-score.bat / run-content.bat 等をVPS上で対象日指定で実行してください。");
+        }
+
+        private static string Fmt(DateTime? d) => d.HasValue ? d.Value.ToString("u") : "記録なし";
     }
 }

@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
@@ -251,6 +252,40 @@ namespace KeibaDataCollector.WordPress
             {
                 Console.WriteLine($"[WordPress] 自動公開設定の取得に失敗。安全側でfalse扱いにします: {ex.Message}");
                 return false;
+            }
+        }
+
+        /// <summary>仕様書§17監視ダッシュボードをWordPress管理画面でも確認できるようにする。
+        /// 認証情報（Application Password）で認証したPOSTのみ受け付ける
+        /// （公開情報のみとはいえ、エラー件数・データソース状態は外部に無条件公開する情報ではないため）。
+        /// 送信失敗はCLI側のダッシュボード表示自体には影響させない（呼び出し側でtry/catchする）。</summary>
+        public async Task PushStatusAsync(MonitoringSnapshot snapshot)
+        {
+            var payload = new
+            {
+                raceDate = snapshot.RaceDate.ToString("yyyy-MM-dd"),
+                generatedAtUtc = snapshot.GeneratedAtUtc.ToString("o"),
+                venuesWithData = snapshot.VenuesWithData,
+                lastDataSyncUtc = snapshot.LastDataSyncUtc?.ToString("o"),
+                lastAiComputeUtc = snapshot.LastAiComputeUtc?.ToString("o"),
+                lastWordPressPublishUtc = snapshot.LastWordPressPublishUtc?.ToString("o"),
+                dataSourceStatus = snapshot.DataSourceStatus,
+                jraLicenseVisible = snapshot.JraLicenseVisible,
+                localVenueLicenseVisible = snapshot.LocalVenueLicenseVisible
+                    .Select(v => new { venueId = v.VenueId, visible = v.Visible }),
+                unprocessedRaceCount = snapshot.UnprocessedRaceCount,
+                errorCountLast24h = snapshot.ErrorCountLast24h,
+                publishBlockedReasons = snapshot.PublishBlockedReasons,
+                autoPublishEnabled = snapshot.AutoPublishEnabled,
+            };
+
+            var json = JsonConvert.SerializeObject(payload);
+            var content = new StringContent(json, Encoding.UTF8, "application/json");
+            var response = await _http.PostAsync($"{_baseUrl}/wp-json/keiba-ai/v1/status", content);
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await response.Content.ReadAsStringAsync();
+                throw new InvalidOperationException($"WordPress status API failed ({response.StatusCode}): {body}");
             }
         }
 

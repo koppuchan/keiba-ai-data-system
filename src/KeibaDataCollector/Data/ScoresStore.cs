@@ -65,6 +65,7 @@ namespace KeibaDataCollector.Data
                     race_number INTEGER NOT NULL,
                     umaban INTEGER NOT NULL,
                     ketto_num TEXT,
+                    jockey_code TEXT,
                     param_bias REAL,
                     param_pace REAL,
                     param_agari_q REAL,
@@ -162,15 +163,16 @@ namespace KeibaDataCollector.Data
         {
             Exec(@"
                 INSERT INTO scores
-                    (race_date, track_code, race_number, umaban, ketto_num,
+                    (race_date, track_code, race_number, umaban, ketto_num, jockey_code,
                      param_bias, param_pace, param_agari_q, param_jockey_roi, param_pedigree_fit, param_training_acc,
                      ai_index, data_completeness, is_scratched, model_version, feature_version, data_cutoff_utc, computed_at_utc)
                 VALUES
-                    (@date, @track, @raceNum, @umaban, @ketto,
+                    (@date, @track, @raceNum, @umaban, @ketto, @jockeyCode,
                      @bias, @pace, @agari, @jockey, @pedigree, @training,
                      @index, @completeness, @scratched, @modelVer, @featureVer, @cutoff, @computed)
                 ON CONFLICT(race_date, track_code, race_number, umaban) DO UPDATE SET
                     ketto_num=excluded.ketto_num,
+                    jockey_code=excluded.jockey_code,
                     param_bias=excluded.param_bias,
                     param_pace=excluded.param_pace,
                     param_agari_q=excluded.param_agari_q,
@@ -192,6 +194,7 @@ namespace KeibaDataCollector.Data
                     p.AddWithValue("@raceNum", s.RaceNumber);
                     p.AddWithValue("@umaban", s.Umaban);
                     p.AddWithValue("@ketto", (object)s.KettoNum ?? DBNull.Value);
+                    p.AddWithValue("@jockeyCode", (object)s.JockeyCode ?? DBNull.Value);
                     p.AddWithValue("@bias", (object)s.Factors?.ParamBias ?? DBNull.Value);
                     p.AddWithValue("@pace", (object)s.Factors?.ParamPace ?? DBNull.Value);
                     p.AddWithValue("@agari", (object)s.Factors?.ParamAgariQ ?? DBNull.Value);
@@ -215,7 +218,7 @@ namespace KeibaDataCollector.Data
         {
             var result = new List<AiIndexResult>();
             using (var cmd = new SQLiteCommand(@"
-                SELECT race_date, track_code, race_number, umaban, ketto_num,
+                SELECT race_date, track_code, race_number, umaban, ketto_num, jockey_code,
                        param_bias, param_pace, param_agari_q, param_jockey_roi, param_pedigree_fit, param_training_acc,
                        ai_index, data_completeness, is_scratched, model_version, feature_version, data_cutoff_utc, computed_at_utc
                 FROM scores
@@ -242,7 +245,7 @@ namespace KeibaDataCollector.Data
         {
             var result = new List<AiIndexResult>();
             using (var cmd = new SQLiteCommand(@"
-                SELECT race_date, track_code, race_number, umaban, ketto_num,
+                SELECT race_date, track_code, race_number, umaban, ketto_num, jockey_code,
                        param_bias, param_pace, param_agari_q, param_jockey_roi, param_pedigree_fit, param_training_acc,
                        ai_index, data_completeness, is_scratched, model_version, feature_version, data_cutoff_utc, computed_at_utc
                 FROM scores
@@ -270,22 +273,23 @@ namespace KeibaDataCollector.Data
                 RaceNumber = r.GetInt32(2),
                 Umaban = r.GetInt32(3),
                 KettoNum = r.IsDBNull(4) ? null : r.GetString(4),
+                JockeyCode = r.IsDBNull(5) ? null : r.GetString(5),
                 Factors = new FactorScores
                 {
-                    ParamBias = r.IsDBNull(5) ? (double?)null : r.GetDouble(5),
-                    ParamPace = r.IsDBNull(6) ? (double?)null : r.GetDouble(6),
-                    ParamAgariQ = r.IsDBNull(7) ? (double?)null : r.GetDouble(7),
-                    ParamJockeyRoi = r.IsDBNull(8) ? (double?)null : r.GetDouble(8),
-                    ParamPedigreeFit = r.IsDBNull(9) ? (double?)null : r.GetDouble(9),
-                    ParamTrainingAcc = r.IsDBNull(10) ? (double?)null : r.GetDouble(10),
+                    ParamBias = r.IsDBNull(6) ? (double?)null : r.GetDouble(6),
+                    ParamPace = r.IsDBNull(7) ? (double?)null : r.GetDouble(7),
+                    ParamAgariQ = r.IsDBNull(8) ? (double?)null : r.GetDouble(8),
+                    ParamJockeyRoi = r.IsDBNull(9) ? (double?)null : r.GetDouble(9),
+                    ParamPedigreeFit = r.IsDBNull(10) ? (double?)null : r.GetDouble(10),
+                    ParamTrainingAcc = r.IsDBNull(11) ? (double?)null : r.GetDouble(11),
                 },
-                AiIndex = r.IsDBNull(11) ? (double?)null : r.GetDouble(11),
-                DataCompleteness = r.GetDouble(12),
-                IsScratched = r.GetInt32(13) != 0,
-                ModelVersion = r.GetString(14),
-                FeatureVersion = r.GetString(15),
-                DataCutoffUtc = DateTime.Parse(r.GetString(16)),
-                ComputedAtUtc = DateTime.Parse(r.GetString(17)),
+                AiIndex = r.IsDBNull(12) ? (double?)null : r.GetDouble(12),
+                DataCompleteness = r.GetDouble(13),
+                IsScratched = r.GetInt32(14) != 0,
+                ModelVersion = r.GetString(15),
+                FeatureVersion = r.GetString(16),
+                DataCutoffUtc = DateTime.Parse(r.GetString(17)),
+                ComputedAtUtc = DateTime.Parse(r.GetString(18)),
             };
         }
 
