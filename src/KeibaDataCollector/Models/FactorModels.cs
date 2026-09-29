@@ -102,6 +102,10 @@ namespace KeibaDataCollector.Models
         public int Waku { get; set; }
         public string JockeyCode { get; set; }
 
+        /// <summary>SEレコードの馬名（Bamei）。仕様書§14「生成後、馬名・馬番・指数・レース番号を
+        /// DBと照合」のうち馬名照合に使う（Issue #13）。</summary>
+        public string HorseName { get; set; }
+
         /// <summary>SEレコードの異常区分コード（0=異常なし、1=取消、2=除外、3=中止 等。
         /// JV-Data仕様書コード表2004参照）。仕様書§9「取消・除外馬を除外」の判定に使う。
         /// 空文字/未設定は「正常」として扱う（既存の出走表取得ロジックが必ず埋めるとは
@@ -148,6 +152,9 @@ namespace KeibaDataCollector.Models
         public int RaceNumber { get; set; }
         public int Umaban { get; set; }
         public string KettoNum { get; set; }
+
+        /// <summary>算出時点の馬名。仕様書§14の馬名照合、および表示用（Issue #13）。</summary>
+        public string HorseName { get; set; }
 
         /// <summary>算出時点の騎手コード。仕様書§15「騎手変更→再計算」の検知に使う
         /// （Validatorが現在の騎手コードと突き合わせ、変わっていればブロックする）。</summary>

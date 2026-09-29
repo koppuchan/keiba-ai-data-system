@@ -95,9 +95,12 @@ namespace KeibaDataCollector.Services
                 RaceNumber = t.RaceNumber,
                 Umaban = t.Umaban,
                 KettoNum = t.KettoNum,
+                HorseName = t.HorseName,
                 JockeyCode = t.JockeyCode,
                 Category = "AiIndexTop5",
-                ContentText = $"AI指数TOP5: {t.RaceNumber}R {t.Umaban}番 指数{t.AiIndex:0.1}",
+                ContentText = string.IsNullOrEmpty(t.HorseName)
+                    ? $"AI指数TOP5: {t.RaceNumber}R {t.Umaban}番 指数{t.AiIndex:0.1}"
+                    : $"AI指数TOP5: {t.RaceNumber}R {t.Umaban}番{t.HorseName} 指数{t.AiIndex:0.1}",
                 Reasons = new List<string> { $"ai_index={t.AiIndex:0.00}", $"data_completeness={t.DataCompleteness:0.00}" },
                 AiIndexSnapshot = t.AiIndex,
                 ModelVersion = t.ModelVersion,

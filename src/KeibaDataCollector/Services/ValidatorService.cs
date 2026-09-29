@@ -58,6 +58,7 @@ namespace KeibaDataCollector.Services
                 RaceNumber = pick.Race.RaceNumber,
                 Umaban = pick.Umaban,
                 KettoNum = pick.KettoNum,
+                HorseName = pick.HorseNameAtGeneration,
                 JockeyCode = pick.JockeyCodeAtGeneration,
                 Category = pick.Category.ToString(),
                 ContentText = pick.Text,
@@ -77,9 +78,8 @@ namespace KeibaDataCollector.Services
         }
 
         /// <summary>生成時点でGeneratedPickが参照していた値と、今のscoresテーブルの値を突き合わせる。
-        /// 仕様書§14「生成後、馬名・馬番・指数・レース番号をDBと照合。不一致があれば公開停止」に対応。
-        /// 馬名（表示名）を持つマスタテーブルはこのシステムにまだ無いため、より強い一意キーである
-        /// 血統登録番号（ketto_num）で代用している（この制約はREADMEに明記する）。</summary>
+        /// 仕様書§14「生成後、馬名・馬番・指数・レース番号をDBと照合。不一致があれば公開停止」に対応
+        /// （馬名照合はIssue #13で追加。SEレコードのBameiをscores.horse_nameに保存している）。</summary>
         private bool CheckAgainstCurrentData(GeneratedPick pick, System.Collections.Generic.List<string> notes)
         {
             var current = _scores.GetRaceScores(pick.Race.RaceDate, pick.Race.TrackCode, pick.Race.RaceNumber)
@@ -105,6 +105,14 @@ namespace KeibaDataCollector.Services
                 ok = false;
                 notes.Add($"血統登録番号が生成時と一致しません（生成時={pick.KettoNum}, 現在={current.KettoNum}）。" +
                           "出走取消・馬番変更等で対象馬が入れ替わった可能性があります。");
+            }
+
+            if (!string.IsNullOrEmpty(pick.HorseNameAtGeneration) && !string.IsNullOrEmpty(current.HorseName)
+                && pick.HorseNameAtGeneration != current.HorseName)
+            {
+                ok = false;
+                notes.Add($"馬名が生成時（{pick.HorseNameAtGeneration}）と現在（{current.HorseName}）で一致しません。" +
+                          "対象馬が入れ替わった可能性があります。");
             }
 
             if (pick.AiIndexAtGeneration.HasValue)

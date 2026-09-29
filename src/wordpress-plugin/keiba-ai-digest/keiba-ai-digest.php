@@ -410,7 +410,7 @@ function keiba_ai_digest_render_top5($top5)
     echo '<section class="keiba-ai-digest-section keiba-ai-digest-top5">';
     echo '<h2>本日のAI指数TOP5</h2>';
     echo '<div class="keiba-table-scroll"><table class="keiba-ai-digest-table">';
-    echo '<thead><tr><th>順位</th><th>R</th><th>馬番</th><th>AI指数</th><th>データ充足率</th></tr></thead><tbody>';
+    echo '<thead><tr><th>順位</th><th>R</th><th>馬番</th><th>馬名</th><th>AI指数</th><th>データ充足率</th></tr></thead><tbody>';
     $rank = 0;
     foreach ($top5 as $row) {
         $rank++;
@@ -418,6 +418,7 @@ function keiba_ai_digest_render_top5($top5)
         echo '<td>' . esc_html($rank) . '</td>';
         echo '<td>' . esc_html(isset($row['raceNumber']) ? $row['raceNumber'] . 'R' : '-') . '</td>';
         echo '<td>' . esc_html(isset($row['umaban']) ? $row['umaban'] . '番' : '-') . '</td>';
+        echo '<td>' . esc_html($row['horseName'] ?? '-') . '</td>';
         echo '<td>' . esc_html(isset($row['aiIndex']) ? number_format((float) $row['aiIndex'], 1) : '-') . '</td>';
         echo '<td>' . esc_html(isset($row['dataCompleteness']) ? round(((float) $row['dataCompleteness']) * 100) . '%' : '-') . '</td>';
         echo '</tr>';
