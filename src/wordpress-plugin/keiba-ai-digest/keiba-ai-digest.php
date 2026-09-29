@@ -321,3 +321,203 @@ function keiba_ai_digest_render_status()
         echo '</ul>';
     }
 }
+
+/* ------------------------------------------------------------------------- *
+ * フロント表示（仕様書§3 完成イメージ：AI指数TOP5・本日の傾向・狙い馬/穴馬/危険な人気馬）
+ *
+ * keiba-race-syncと同じ方針: 本文はエディタで書かず the_content フィルタで自動生成する。
+ * テーマのheader/footerはそのまま使われる。
+ * ------------------------------------------------------------------------- */
+
+add_action('wp_enqueue_scripts', function () {
+    if (is_singular('keiba_digest')) {
+        wp_enqueue_style(
+            'keiba-ai-digest',
+            plugins_url('assets/keiba-ai-digest.css', __FILE__),
+            array(),
+            KEIBA_AI_DIGEST_VERSION
+        );
+    }
+});
+
+add_filter('the_content', function ($content) {
+    if (!is_singular('keiba_digest') || !in_the_loop() || !is_main_query()) {
+        return $content;
+    }
+    return $content . keiba_ai_digest_render_digest(get_the_ID());
+}, 10);
+
+function keiba_ai_digest_decode_meta($post_id, $meta_key)
+{
+    $raw = get_post_meta($post_id, $meta_key, true);
+    if (empty($raw)) {
+        return null;
+    }
+    $decoded = json_decode($raw, true);
+    return json_last_error() === JSON_ERROR_NONE ? $decoded : null;
+}
+
+/**
+ * 1開催場・1日分のダイジェストを描画する。
+ *
+ * license_visibleは公開時点（DigestPublisherService.PublishAsync実行時）のLicenseGate判定を
+ * そのまま持たせた値で、表示のたびに許諾状態を再確認するものではない
+ * （このプラグイン単体ではLicenseGateの状態を直接参照できないため）。許諾が後から取り消された
+ * 場合、収集アプリ側は次回以降の更新を止めるが、既に公開済みのこの投稿自体は次の更新まで
+ * 残り続ける。horse-race-custom-builderのhrc_is_race_visibleも同様に「その場でのリアルタイム
+ * 取り消し」までは行っておらず、同じ運用上の制約として扱う。
+ */
+function keiba_ai_digest_render_digest($post_id)
+{
+    $license_visible = (bool) get_post_meta($post_id, 'license_visible', true);
+    if (!$license_visible) {
+        return '<p class="keiba-ai-digest-hidden">現在、このコンテンツは公開許諾の都合により表示できません。</p>';
+    }
+
+    $top5 = keiba_ai_digest_decode_meta($post_id, 'ai_index_top5');
+    $trend_final = keiba_ai_digest_decode_meta($post_id, 'trend_final');
+    $trend_live = keiba_ai_digest_decode_meta($post_id, 'trend_live');
+    $trend_morning = keiba_ai_digest_decode_meta($post_id, 'trend_morning');
+    $picks = keiba_ai_digest_decode_meta($post_id, 'picks');
+
+    // 終了後 > 開催中 > 朝、の順で最も新しい段階のものを表示する（各段階は独立して
+    // 保存されており、自動で遷移しないため。KeibaDataCollector README参照）。
+    $trend = $trend_final ?: ($trend_live ?: $trend_morning);
+
+    ob_start();
+    echo '<div class="keiba-ai-digest">';
+
+    echo '<p class="keiba-ai-digest-disclaimer">'
+        . 'AI指数・傾向・狙い目は過去データおよび当日データの統計的な分析結果であり、'
+        . 'レースの結果や利益を保証するものではありません。'
+        . '</p>';
+
+    keiba_ai_digest_render_top5($top5);
+    keiba_ai_digest_render_trend($trend);
+    keiba_ai_digest_render_picks($picks);
+
+    echo '</div>';
+    return ob_get_clean();
+}
+
+/** 仕様書§9 AI指数TOP5。 */
+function keiba_ai_digest_render_top5($top5)
+{
+    if (empty($top5) || !is_array($top5)) {
+        return;
+    }
+
+    echo '<section class="keiba-ai-digest-section keiba-ai-digest-top5">';
+    echo '<h2>本日のAI指数TOP5</h2>';
+    echo '<div class="keiba-table-scroll"><table class="keiba-ai-digest-table">';
+    echo '<thead><tr><th>順位</th><th>R</th><th>馬番</th><th>AI指数</th><th>データ充足率</th></tr></thead><tbody>';
+    $rank = 0;
+    foreach ($top5 as $row) {
+        $rank++;
+        echo '<tr>';
+        echo '<td>' . esc_html($rank) . '</td>';
+        echo '<td>' . esc_html(isset($row['raceNumber']) ? $row['raceNumber'] . 'R' : '-') . '</td>';
+        echo '<td>' . esc_html(isset($row['umaban']) ? $row['umaban'] . '番' : '-') . '</td>';
+        echo '<td>' . esc_html(isset($row['aiIndex']) ? number_format((float) $row['aiIndex'], 1) : '-') . '</td>';
+        echo '<td>' . esc_html(isset($row['dataCompleteness']) ? round(((float) $row['dataCompleteness']) * 100) . '%' : '-') . '</td>';
+        echo '</tr>';
+    }
+    echo '</tbody></table></div>';
+    echo '</section>';
+}
+
+/** 仕様書§10 本日の傾向。 */
+function keiba_ai_digest_render_trend($trend)
+{
+    if (empty($trend) || !is_array($trend)) {
+        return;
+    }
+
+    $stage_label = array('Morning' => '朝（事前想定）', 'Live' => '開催中（現時点）', 'Final' => '終了後（本日の結果）');
+    $stage = isset($trend['stage']) ? $trend['stage'] : '';
+
+    echo '<section class="keiba-ai-digest-section keiba-ai-digest-trend">';
+    echo '<h2>本日の傾向' . (isset($stage_label[$stage]) ? ' — ' . esc_html($stage_label[$stage]) : '') . '</h2>';
+
+    $weather = isset($trend['weatherTrack']) ? $trend['weatherTrack'] : null;
+    if ($weather) {
+        // 天候・馬場状態コードの表示文字列変換表は未確認のため、コード値をそのまま出す
+        // （KeibaDataCollector側のChakusaCDと同じ扱い。README参照）。
+        echo '<p class="keiba-ai-digest-weather">'
+            . '天候コード: ' . esc_html($weather['weatherCode'] ?? '-')
+            . ' / 芝馬場コード: ' . esc_html($weather['turfConditionCode'] ?? '-')
+            . ' / ダート馬場コード: ' . esc_html($weather['dirtConditionCode'] ?? '-')
+            . '</p>';
+    }
+
+    echo '<ul class="keiba-ai-digest-trend-list">';
+
+    $pace = isset($trend['pace']) ? $trend['pace'] : null;
+    if ($pace && !empty($pace['hasEnoughSample'])) {
+        $favored = !empty($pace['frontRunnerFavored']) ? '先行有利' : '差し有利';
+        echo '<li>脚質傾向: <strong>' . esc_html($favored) . '</strong>（サンプル' . esc_html($pace['sampleCount'] ?? 0) . '件）</li>';
+    } else {
+        echo '<li>脚質傾向: サンプル不足のため判定なし</li>';
+    }
+
+    $agari = isset($trend['agari']) ? $trend['agari'] : null;
+    if ($agari && !empty($agari['averageAgari3F'])) {
+        echo '<li>上がり3F平均: ' . esc_html(number_format((float) $agari['averageAgari3F'], 1)) . '秒（サンプル' . esc_html($agari['sampleCount'] ?? 0) . '件）</li>';
+    }
+
+    $passage = isset($trend['passage']) ? $trend['passage'] : null;
+    if ($passage && isset($passage['leaderWinRate'])) {
+        echo '<li>最終コーナー先頭馬の勝率: ' . esc_html(round(((float) $passage['leaderWinRate']) * 100)) . '%（サンプル' . esc_html($passage['sampleCount'] ?? 0) . 'レース）</li>';
+    } else {
+        echo '<li>通過順傾向: サンプル不足のため判定なし</li>';
+    }
+
+    echo '</ul>';
+
+    $post_position = isset($trend['postPosition']['byWaku']) ? $trend['postPosition']['byWaku'] : null;
+    if ($post_position && is_array($post_position)) {
+        echo '<div class="keiba-table-scroll"><table class="keiba-ai-digest-table keiba-ai-digest-waku-table">';
+        echo '<thead><tr><th>枠</th><th>連対率</th><th>サンプル数</th></tr></thead><tbody>';
+        ksort($post_position, SORT_NUMERIC);
+        foreach ($post_position as $waku => $stat) {
+            echo '<tr>';
+            echo '<td>' . esc_html($waku) . '</td>';
+            echo '<td>' . esc_html(isset($stat['placeRate']) ? round(((float) $stat['placeRate']) * 100) . '%' : '判定なし') . '</td>';
+            echo '<td>' . esc_html($stat['sampleCount'] ?? 0) . '</td>';
+            echo '</tr>';
+        }
+        echo '</tbody></table></div>';
+    }
+
+    echo '</section>';
+}
+
+/** 仕様書§11 今日の狙い馬・穴馬・危険な人気馬。 */
+function keiba_ai_digest_render_picks($picks)
+{
+    if (empty($picks) || !is_array($picks)) {
+        return;
+    }
+
+    $groups = array('Nerai' => array(), 'Ana' => array(), 'Kiken' => array());
+    foreach ($picks as $pick) {
+        $category = isset($pick['category']) ? $pick['category'] : '';
+        if (isset($groups[$category])) {
+            $groups[$category][] = $pick;
+        }
+    }
+
+    $section_labels = array('Nerai' => '今日の狙い馬', 'Ana' => '今日の穴馬', 'Kiken' => '危険な人気馬');
+
+    foreach ($section_labels as $category => $label) {
+        if (empty($groups[$category])) {
+            continue;
+        }
+        echo '<section class="keiba-ai-digest-section keiba-ai-digest-picks keiba-ai-digest-picks-' . esc_attr(strtolower($category)) . '">';
+        echo '<h2>' . esc_html($label) . '</h2><ul>';
+        foreach ($groups[$category] as $pick) {
+            echo '<li>' . esc_html($pick['text'] ?? '') . '</li>';
+        }
+        echo '</ul></section>';
+    }
+}

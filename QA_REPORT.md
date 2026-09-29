@@ -44,8 +44,16 @@ Issue #1〜#9で実装した内容を、仕様書§21受け入れ基準および
 
 ## 推奨する次のステップ
 
-1. 全PR（#11〜このIssueのPRまで）をレビューし、順にマージする
+1. 全PRをレビューし、順にマージする（PR番号は#11〜#20から#21〜#30へ振り直し済み。詳細は各PRのコメント参照）
 2. Windows機（またはWindows上のCI）で`dotnet build`を実行し、コンパイルエラーを解消する
 3. VPS上でJV-Link/UmaConnの利用キーを設定し、`probe`コマンドで実際にデータが取れるか確認する
-4. WordPressにテーマ側の表示（`keiba_digest`投稿・`race`投稿の見せ方）を実装する
+4. ~~WordPressにテーマ側の表示を実装する~~ → `keiba_digest`投稿側はIssue #11（フロント表示）で対応済み。`race`投稿側は既存`keiba-race-sync`プラグインの表示をそのまま使う
 5. 許諾確認が取れるまでLicenseGateを`pending`のままにし、内部分析用途（`licensegate`/`weights`/`dashboard`等のCLI確認）に限定して動作確認する
+
+## 追記（Issue #11: フロント表示）
+
+`keiba_digest`投稿の個別ページに、AI指数TOP5・本日の傾向・狙い馬/穴馬/危険な人気馬を自動表示する
+`the_content`フィルタを追加した。実装の過程で、`WordPressClient`のJSON送信設定（`CamelCaseSettings`）に
+列挙型（`PickCategory`/`TrendStage`）の変換設定が無く、整数値でシリアライズされてしまう不具合を発見・
+修正した（`StringEnumConverter`を追加。`predictions.category`列が既に`Category.ToString()`で
+文字列保存していたのと矛盾していた）。詳細は同Issueのプラグイン`README.md`「表示側の既知の制約」を参照。
