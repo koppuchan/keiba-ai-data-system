@@ -631,13 +631,26 @@ namespace KeibaDataCollector
                     var trendLive = trendStore.Get(targetDate, trackCode, TrendStage.Live);
                     var trendFinal = trendStore.Get(targetDate, trackCode, TrendStage.Final);
 
-                    var publishOutcome = publisher
-                        .PublishAsync(targetDate, trackCode, isCentral, top5, trendMorning, trendLive, trendFinal, validated)
-                        .GetAwaiter().GetResult();
+                    // WordPress送信の失敗は仕様書§15「WordPress API失敗→再試行＋通知」・
+                    // §21受け入れ基準「WordPress更新失敗時に通知される」の対象。
+                    // WordPressClient側で最大4回再試行済みのため、ここに例外が来た時点で
+                    // 再試行が尽きた後の最終失敗を意味する。他の失敗（生成・検証）と区別して
+                    // critical=trueで通知し、かつ1開催場の公開失敗で他の開催場を巻き添えにしない
+                    // よう、この呼び出しだけ個別にtry/catchする。
+                    try
+                    {
+                        var publishOutcome = publisher
+                            .PublishAsync(targetDate, trackCode, isCentral, top5, trendMorning, trendLive, trendFinal, validated)
+                            .GetAwaiter().GetResult();
 
-                    Console.WriteLine(publishOutcome.WasPublished
-                        ? $"[{source.SourceName}] {targetDate:yyyy-MM-dd} 場={trackCode} WordPress公開完了（ピック{publishOutcome.PublishedPickCount}件、公開停止{publishOutcome.BlockedPickCount}件）"
-                        : $"[{source.SourceName}] {targetDate:yyyy-MM-dd} 場={trackCode} WordPress公開を見送り: {publishOutcome.SkipReason}");
+                        Console.WriteLine(publishOutcome.WasPublished
+                            ? $"[{source.SourceName}] {targetDate:yyyy-MM-dd} 場={trackCode} WordPress公開完了（ピック{publishOutcome.PublishedPickCount}件、公開停止{publishOutcome.BlockedPickCount}件）"
+                            : $"[{source.SourceName}] {targetDate:yyyy-MM-dd} 場={trackCode} WordPress公開を見送り: {publishOutcome.SkipReason}");
+                    }
+                    catch (Exception publishEx)
+                    {
+                        LogFailure(source.SourceName, $"{trackCode} のWordPress公開に失敗（再試行済み。このレース場のみスキップして続行）", publishEx, critical: true);
+                    }
                 }
                 LogSuccess(source.SourceName, "コンテンツ生成・公開", "正常終了");
             }
@@ -713,6 +726,14 @@ namespace KeibaDataCollector
                 if (DateTime.Now >= DateTime.Today.Add(RaceResultService.DailyCutoff))
                 {
                     Console.WriteLine($"[{source.SourceName}] 本日の監視時間を過ぎたため再開しません。");
+                    // ここまでの再試行がすべて尽きた（＝これ以上自動では回復しない）ことを意味するため、
+                    // 仕様書§15「WordPress API失敗→再試行＋通知」・§21「WordPress更新失敗時に通知される」
+                    // に対応してcritical通知にする。残りのレースの結果・払戻がその日反映されないまま
+                    // 終わる可能性がある、運用者が気付くべき状態のため。
+                    LogFailure(source.SourceName,
+                        $"監視が{attempt}回の再試行後も本日の打ち切り時刻までに完了しませんでした（残りのレースが未反映の可能性）",
+                        new InvalidOperationException("watch loop exhausted retries before daily cutoff"),
+                        critical: true);
                     return;
                 }
 
