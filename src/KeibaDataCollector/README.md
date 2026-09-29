@@ -4,7 +4,10 @@
 同一構成のWindows常駐アプリ）を土台に、JRAVAN＋競馬最強の法則WEB 全自動AI競馬データシステム仕様書の
 各コンポーネントを追加していくプロジェクト。詳細は [`DEVELOPMENT_PLAN.md`](../../DEVELOPMENT_PLAN.md) を参照。
 
-## 現状（Issue #9まで: 既存機能のポート + LicenseGate + AI指数エンジン + Trend Engine + Content Generator + Validator + WordPress Publisher + レース後検証 + エラー処理・監視ダッシュボード）
+## 現状（Issue #10まで: 全機能実装済み・QA完了。実機ビルド・動作確認は未実施）
+
+仕様書の全コンポーネント（Source Adapter〜Verification DB、LicenseGate、監視ダッシュボード）を実装済み。
+受け入れ基準（仕様書§21）のコードレビューによる確認結果は [`../../QA_REPORT.md`](../../QA_REPORT.md) を参照。
 
 `horse-race-custom-builder` の実装をそのまま移植し、このリポジトリ単体で既存システムと同等の
 コマンド一式（`setup` / `morning` / `predict` / `score` / `watch` / `probe` / `backfill` / `dbstats`）

@@ -7,6 +7,7 @@ JRAVAN＋競馬最強の法則WEB 中央・地方競馬 全自動AI競馬デー�
 LicenseGate・傾向分析・コンテンツ自動生成・Validator・監視ダッシュボードを追加していくプロジェクト。
 
 - 開発計画・フェーズ構成: [`DEVELOPMENT_PLAN.md`](DEVELOPMENT_PLAN.md)
+- QA・受け入れ基準チェック: [`QA_REPORT.md`](QA_REPORT.md)
 - 収集アプリ本体: [`src/KeibaDataCollector/`](src/KeibaDataCollector/)
 - WordPress companion プラグイン: [`src/wordpress-plugin/keiba-ai-digest/`](src/wordpress-plugin/keiba-ai-digest/)
   （AI指数TOP5・本日の傾向・狙い馬/穴馬/危険な人気馬。既存の`keiba-race-sync`とは別プラグイン）
