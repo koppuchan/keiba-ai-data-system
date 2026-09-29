@@ -18,11 +18,9 @@ namespace KeibaDataCollector.Services
     /// 開催中・終了後段階は「当日結果」そのものが対象のため、historical.sqlite3を経由せず
     /// 当日のRACEデータ（RA+SE）を直接読んで都度集計する（FactorPublishServiceと同じ読み方）。
     ///
-    /// 既知の制約: 通過順傾向（最終コーナー先頭馬の勝率）は、朝段階では算出できない。
-    /// BackfillServiceがrace_entries.CornerPassage4を意図的にnullのまま保存しており
-    /// （「コーナー通過はRA側の配列。必要になれば別テーブルに分離する」との既存コメント通り、
-    /// 過去分のコーナー通過順は蓄積されていない）、朝段階の母集団を作れないため。
-    /// 数値を捏造せずSampleCount=0・LeaderWinRate=nullを返す（既存コードベース全体の方針と同じ）。
+    /// 通過順傾向（最終コーナー先頭馬の勝率）の朝段階は、race_entries.final_corner_leader列
+    /// （Issue #12でBackfillServiceに追加）を母集団にする。この列が無いDB・再backfill前の行は
+    /// NULLのままなので、その分だけサンプル数が少なくなる（断定はMinSample未満なら行わない）。
     /// </summary>
     public class TrendEngineService
     {
@@ -60,7 +58,7 @@ namespace KeibaDataCollector.Services
                 snapshot.Pace = ComputeHistoricalPace(trackCode);
                 snapshot.PostPosition = ComputeHistoricalPostPosition(trackCode);
                 snapshot.Agari = ComputeHistoricalAgari(trackCode);
-                snapshot.Passage = new PassageTendency(); // 既知の制約によりサンプル0のまま（クラスコメント参照）。
+                snapshot.Passage = ComputeHistoricalPassage(trackCode);
                 snapshot.RacesConsidered = CountHistoricalRaces(trackCode);
             }
             else
@@ -383,6 +381,34 @@ namespace KeibaDataCollector.Services
                 }
             }
             return new AgariTendency();
+        }
+
+        /// <summary>朝段階の通過順傾向（最終コーナー先頭馬の勝率）。Issue #12でBackfillServiceが
+        /// race_entries.final_corner_leaderへ保存するようになった実績データを母集団にする。
+        /// 旧DB・再backfill前の行はNULLのため、AND final_corner_leader IS NOT NULLで自然に除外される
+        /// （0件扱いではなく「その行は判定不能」として単に集計対象から外れる）。</summary>
+        private PassageTendency ComputeHistoricalPassage(string trackCode)
+        {
+            using (var cmd = new SQLiteCommand(@"
+                SELECT COUNT(*), SUM(CASE WHEN chakujun = 1 THEN 1 ELSE 0 END)
+                FROM race_entries
+                WHERE track_code=@track AND chakujun > 0 AND final_corner_leader = 1;", _historical.Connection))
+            {
+                cmd.Parameters.AddWithValue("@track", trackCode);
+                using (var r = cmd.ExecuteReader())
+                {
+                    if (r.Read() && !r.IsDBNull(0))
+                    {
+                        var sample = (int)r.GetInt64(0);
+                        var wins = r.IsDBNull(1) ? 0 : r.GetInt64(1);
+                        var tendency = new PassageTendency { SampleCount = sample };
+                        if (sample >= PassageTendency.MinSample)
+                            tendency.LeaderWinRate = (double)wins / sample;
+                        return tendency;
+                    }
+                }
+            }
+            return new PassageTendency();
         }
 
         private int CountHistoricalRaces(string trackCode)

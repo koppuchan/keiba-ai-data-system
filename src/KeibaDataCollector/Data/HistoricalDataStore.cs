@@ -44,6 +44,7 @@ namespace KeibaDataCollector.Data
             MigrateAddFukushoPayoutColumn();
             MigrateAddRaceNumberColumn();
             MigrateAddEarlyPositionRatioColumn();
+            MigrateAddFinalCornerLeaderColumn();
         }
 
         /// <summary>既に稼働中のDB（このカラムが無い状態でbackfill済みのもの）向けの移行措置。
@@ -96,6 +97,24 @@ namespace KeibaDataCollector.Data
             }
         }
 
+        /// <summary>Trend Engine（仕様書§10）の朝段階・通過順傾向用。RAレコードの最終コーナー
+        /// 通過順位から「この馬がその時点で先頭だったか」を保持する列を追加する（Issue #12）。
+        /// BackfillServiceが早期通過順位(early_position_ratio)を算出しているのと同じ材料
+        /// （JvFactorRecordParser.ParseLatestCornerOrder）から求める。旧DBの既存行はNULLのままなので、
+        /// 過去分を朝段階の集計対象にするには再度run-backfill.batが必要。</summary>
+        private void MigrateAddFinalCornerLeaderColumn()
+        {
+            try
+            {
+                Exec("ALTER TABLE race_entries ADD COLUMN final_corner_leader INTEGER;");
+                Console.WriteLine("[HistoricalDataStore] race_entries に final_corner_leader 列を追加しました（再backfillで実値が入ります）。");
+            }
+            catch (SQLiteException ex) when (ex.Message.IndexOf("duplicate column", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                // 既に列がある。想定内。
+            }
+        }
+
         private void EnsureSchema()
         {
             Exec(@"
@@ -116,6 +135,7 @@ namespace KeibaDataCollector.Data
                     corner_passage_4 TEXT,
                     fukusho_payout REAL,
                     early_position_ratio REAL,
+                    final_corner_leader INTEGER,
                     PRIMARY KEY (ketto_num, race_date, track_code, distance)
                 );
                 CREATE INDEX IF NOT EXISTS idx_race_entries_track ON race_entries(track_code, distance, track_surface_code);
@@ -158,11 +178,11 @@ namespace KeibaDataCollector.Data
                 INSERT INTO race_entries
                     (ketto_num, race_date, track_code, race_number, track_surface_code, distance, waku, umaban,
                      jockey_code, trainer_code, chakujun, tansho_odds, agari_3f, corner_passage_4, fukusho_payout,
-                     early_position_ratio)
+                     early_position_ratio, final_corner_leader)
                 VALUES
                     (@ketto_num, @race_date, @track_code, @race_number, @track_surface_code, @distance, @waku, @umaban,
                      @jockey_code, @trainer_code, @chakujun, @tansho_odds, @agari_3f, @corner_passage_4, @fukusho_payout,
-                     @early_position_ratio)
+                     @early_position_ratio, @final_corner_leader)
                 ON CONFLICT(ketto_num, race_date, track_code, distance) DO UPDATE SET
                     race_number=excluded.race_number,
                     track_surface_code=excluded.track_surface_code,
@@ -174,7 +194,8 @@ namespace KeibaDataCollector.Data
                     tansho_odds=excluded.tansho_odds,
                     agari_3f=excluded.agari_3f,
                     corner_passage_4=excluded.corner_passage_4,
-                    early_position_ratio=excluded.early_position_ratio;
+                    early_position_ratio=excluded.early_position_ratio,
+                    final_corner_leader=excluded.final_corner_leader;
             ",
                 p => {
                     p.AddWithValue("@ketto_num", e.KettoNum);
@@ -193,6 +214,7 @@ namespace KeibaDataCollector.Data
                     p.AddWithValue("@corner_passage_4", (object)e.CornerPassage4 ?? DBNull.Value);
                     p.AddWithValue("@fukusho_payout", (object)e.FukushoPayout ?? DBNull.Value);
                     p.AddWithValue("@early_position_ratio", (object)e.EarlyPositionRatio ?? DBNull.Value);
+                    p.AddWithValue("@final_corner_leader", e.IsFinalCornerLeader.HasValue ? (object)(e.IsFinalCornerLeader.Value ? 1 : 0) : DBNull.Value);
                 });
         }
 
