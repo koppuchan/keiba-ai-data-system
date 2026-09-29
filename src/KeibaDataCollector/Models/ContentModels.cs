@@ -46,7 +46,15 @@ namespace KeibaDataCollector.Models
         public PickCategory Category { get; set; }
         public RaceKey Race { get; set; }
         public int Umaban { get; set; }
+        public string KettoNum { get; set; }
         public string Text { get; set; }
         public List<string> Reasons { get; set; } = new List<string>();
+
+        /// <summary>生成時点で参照した実データ。Validator（仕様書§14・Issue #6）が
+        /// 公開直前にDBの「今」の値と突き合わせて不一致を検知するための基準値。
+        /// Reasonsは人間可読なログ用の文字列のため、機械的な再照合にはこちらを使う。</summary>
+        public double? AiIndexAtGeneration { get; set; }
+        public int? NinkiAtGeneration { get; set; }
+        public double? TanshoOddsAtGeneration { get; set; }
     }
 }
