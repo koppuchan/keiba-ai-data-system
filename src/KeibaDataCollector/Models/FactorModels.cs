@@ -95,6 +95,12 @@ namespace KeibaDataCollector.Models
         public string TrackSurfaceCode { get; set; }
         public int Waku { get; set; }
         public string JockeyCode { get; set; }
+
+        /// <summary>SEレコードの異常区分コード（0=異常なし、1=取消、2=除外、3=中止 等。
+        /// JV-Data仕様書コード表2004参照）。仕様書§9「取消・除外馬を除外」の判定に使う。
+        /// 空文字/未設定は「正常」として扱う（既存の出走表取得ロジックが必ず埋めるとは
+        /// 限らないため、フェイルオープンではなく実質フェイルセーフ側＝除外しない、を選択）。</summary>
+        public string IJyoCd { get; set; }
     }
 
     /// <summary>6ファクターの算出結果（0〜100点、算出できないものはnull）。
@@ -107,5 +113,53 @@ namespace KeibaDataCollector.Models
         public double? ParamJockeyRoi { get; set; }      // ④騎手コース回収率
         public double? ParamPedigreeFit { get; set; }    // ⑤血統適性・妙味
         public double? ParamTrainingAcc { get; set; }    // ⑥調教・加速ラップ
+
+        /// <summary>算出できた項目数（0〜6）。データ充足率＝ FilledCount/6。</summary>
+        public int FilledCount =>
+            (ParamBias.HasValue ? 1 : 0) + (ParamPace.HasValue ? 1 : 0) + (ParamAgariQ.HasValue ? 1 : 0) +
+            (ParamJockeyRoi.HasValue ? 1 : 0) + (ParamPedigreeFit.HasValue ? 1 : 0) + (ParamTrainingAcc.HasValue ? 1 : 0);
+    }
+
+    /// <summary>仕様書§8「重みはDB設定値にし、中央/地方・芝/ダート等で別設定可能にする」に対応する
+    /// 重み設定。1件が「セグメント」（例: central:turf, local:dirt）に対応する。</summary>
+    public class AiIndexWeights
+    {
+        public string Segment { get; set; }
+        public double WeightBias { get; set; } = 1.0;
+        public double WeightPace { get; set; } = 1.0;
+        public double WeightAgariQ { get; set; } = 1.0;
+        public double WeightJockeyRoi { get; set; } = 1.0;
+        public double WeightPedigreeFit { get; set; } = 1.0;
+        public double WeightTrainingAcc { get; set; } = 1.0;
+        public DateTime UpdatedAtUtc { get; set; }
+    }
+
+    /// <summary>AI指数の算出結果1頭分。scoresテーブルの1行に対応する。</summary>
+    public class AiIndexResult
+    {
+        public DateTime RaceDate { get; set; }
+        public string TrackCode { get; set; }
+        public int RaceNumber { get; set; }
+        public int Umaban { get; set; }
+        public string KettoNum { get; set; }
+
+        public FactorScores Factors { get; set; }
+
+        /// <summary>Σ(値×重み)/Σ(重み)。算出できた（null出ない）ファクターのみ対象にする
+        /// 重み付き平均。算出できたファクターが0件ならnull。
+        /// 単純合計にすると「算出できたファクター数が多い馬」が有利になる不具合が
+        /// horse-race-custom-builderのフロントエンド実装で実際に起きたため（同リポジトリREADME参照）、
+        /// このサーバー側実装では最初から重み付き平均のみを採用する。</summary>
+        public double? AiIndex { get; set; }
+
+        /// <summary>0.0〜1.0。6項目中いくつ算出できたか。AI指数TOP5の同点タイブレークに使う。</summary>
+        public double DataCompleteness { get; set; }
+
+        public bool IsScratched { get; set; }
+
+        public string ModelVersion { get; set; }
+        public string FeatureVersion { get; set; }
+        public DateTime DataCutoffUtc { get; set; }
+        public DateTime ComputedAtUtc { get; set; }
     }
 }

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using KeibaDataCollector.Data;
 using KeibaDataCollector.Interop;
 using KeibaDataCollector.Models;
 using KeibaDataCollector.WordPress;
@@ -9,7 +10,8 @@ using static KeibaDataCollector.Interop.JvDataSdk.JVData_Struct;
 namespace KeibaDataCollector.Services
 {
     /// <summary>
-    /// 当日の出走馬について6ファクターを算出し、WordPressのhrc_factorsへ送信する。
+    /// 当日の出走馬について6ファクター＋統合AI指数（仕様書§8・§9）を算出し、
+    /// WordPressのhrc_factorsへ送信するとともに、AI指数はscoresテーブルへ永続化する。
     ///
     /// WordPress側の race_card（RaceCardService経由で既に送信済み）には血統登録番号(KettoNum)が
     /// 含まれていない（表示に不要なため元々持たせていない）。そのため、ここではWordPress経由ではなく
@@ -24,20 +26,33 @@ namespace KeibaDataCollector.Services
     {
         private readonly IRaceDataSource _source;
         private readonly WordPressClient _wp;
-        private readonly FactorScoringService _scoring;
+        private readonly AiIndexService _aiIndex;
+        private readonly ScoresStore _scoresStore;
 
         // RaceCardServiceと同じ理由（出馬表は開催日より前に公開されるため）。
         private const string EarlyAnchorFromTime = "19860101000000";
 
-        public FactorPublishService(IRaceDataSource source, WordPressClient wp, FactorScoringService scoring)
+        /// <summary>SourceNameに"中央"を含むかどうかでJV-Link/UmaConnを判別する。
+        /// IRaceDataSourceインターフェース自体にIsCentral相当のプロパティを追加すると
+        /// Issue #2で既にレビュー中のインターフェースを変更することになるため、
+        /// 既存の公開プロパティ（SourceName）から導出する非侵襲的な方法を選んだ。</summary>
+        private bool IsCentral => _source.SourceName.Contains("中央");
+
+        public FactorPublishService(IRaceDataSource source, WordPressClient wp, FactorScoringService scoring, ScoresStore scoresStore)
         {
             _source = source;
             _wp = wp;
-            _scoring = scoring;
+            _scoresStore = scoresStore;
+            _aiIndex = new AiIndexService(scoring, scoresStore);
         }
 
         public void RunForToday(DateTime targetDate)
         {
+            // この実行で読んだデータの基準時刻。同一実行内の全馬で揃える
+            // （仕様書§8 data_cutoffの粒度は「この算出バッチが何時点のデータを見たか」で十分なため、
+            // 馬ごとに個別のタイムスタンプを持たせる必要はない）。
+            var dataCutoffUtc = DateTime.UtcNow;
+
             var open = _source.Open("RACE", EarlyAnchorFromTime, DataOption.ThisWeekAndToday);
             if (open.ReturnCode == -1)
             {
@@ -101,6 +116,7 @@ namespace KeibaDataCollector.Services
                             TrackSurfaceCode = raceInfo.TrackSurfaceCode,
                             Waku = SafeInt(se.Wakuban),
                             JockeyCode = Trim(se.KisyuCode),
+                            IJyoCd = Trim(se.IJyoCD),
                         };
 
                         if (!entriesByRace.TryGetValue(slug, out var list))
@@ -121,6 +137,8 @@ namespace KeibaDataCollector.Services
             int published = 0, skipped = 0, failed = 0;
             foreach (var slug in entriesByRace.Keys)
             {
+                var raceKey = raceKeys[slug];
+
                 // スコア計算自体も1レース単位で保護する。以前はここが素通しで、
                 // FactorScoringService内の未知の例外（実機で発生: 特定コース条件の
                 // 母集団が0件になりSUM集計がNULLを返してInvalidCastExceptionになった
@@ -132,13 +150,20 @@ namespace KeibaDataCollector.Services
                 try
                 {
                     foreach (var (umaban, input) in entriesByRace[slug])
-                        scores[umaban] = _scoring.Compute(input);
+                    {
+                        // AiIndexServiceが内部でFactorScoringService.Computeを1回だけ呼び、
+                        // 6ファクター（hrc_factors送信用）とAI指数（scores永続化用）の両方を
+                        // 同じ計算結果から作る（二重計算を避ける）。
+                        var result = _aiIndex.ComputeAndPersist(
+                            input, targetDate, raceKey.RaceNumber, umaban, IsCentral, dataCutoffUtc);
+                        scores[umaban] = result.Factors;
+                    }
                 }
                 catch (Exception ex)
                 {
                     failed++;
                     Console.WriteLine(
-                        $"[{_source.SourceName}] {slug} 6ファクターの計算に失敗（このレースのみスキップして続行）: {ex.Message}");
+                        $"[{_source.SourceName}] {slug} 6ファクター/AI指数の計算に失敗（このレースのみスキップして続行）: {ex.Message}");
                     continue;
                 }
 
@@ -151,7 +176,7 @@ namespace KeibaDataCollector.Services
                 bool applied;
                 try
                 {
-                    applied = _wp.UpsertFactorsAsync(raceKeys[slug], scores).GetAwaiter().GetResult();
+                    applied = _wp.UpsertFactorsAsync(raceKey, scores).GetAwaiter().GetResult();
                 }
                 catch (Exception ex)
                 {
@@ -186,10 +211,32 @@ namespace KeibaDataCollector.Services
             Console.WriteLine(
                 $"[{_source.SourceName}] {targetDate:yyyy-MM-dd} 6ファクター算出 {published}レース 完了{note}");
 
+            LogVenueTop5(targetDate, raceKeys.Values.Select(k => k.TrackCode).Distinct());
+
             // 送信失敗があった日は、次回のscore実行で拾い直せるよう終了コードに残す。
             if (failed > 0)
                 throw new InvalidOperationException(
                     $"{failed}レースの反映に失敗しました（他のレースは反映済み）。次回のscore実行で再試行されます。");
+        }
+
+        /// <summary>仕様書§9 AI指数TOP5をログ出力する。WordPressへの実publishはContent Generator/
+        /// Publisher側（Issue #5, #7）の責務のため、ここでは算出結果の可視化のみ行う。
+        /// GetVenueTop5自体はpublicなScoresStore経由で他のサービスからも呼べる。</summary>
+        private void LogVenueTop5(DateTime targetDate, IEnumerable<string> trackCodes)
+        {
+            foreach (var trackCode in trackCodes)
+            {
+                var top5 = _scoresStore.GetVenueTop5(targetDate, trackCode);
+                if (top5.Count == 0) continue;
+
+                Console.WriteLine($"[{_source.SourceName}] {targetDate:yyyy-MM-dd} 場={trackCode} AI指数TOP5:");
+                foreach (var r in top5)
+                {
+                    Console.WriteLine(
+                        $"    R{r.RaceNumber} {r.Umaban}番 指数={r.AiIndex:0.0} 充足率={r.DataCompleteness:P0} " +
+                        $"model={r.ModelVersion}");
+                }
+            }
         }
 
         private static bool HasAnyScore(FactorScores s) =>
