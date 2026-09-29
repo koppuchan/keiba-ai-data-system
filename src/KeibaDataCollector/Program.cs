@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Threading;
 using KeibaDataCollector.Data;
 using KeibaDataCollector.Interop;
@@ -47,12 +48,24 @@ namespace KeibaDataCollector
         {
             args = args ?? new string[0];
 
-            // licensegate はJV-Link/UmaConnのCOM初期化を必要としないため、他のモードより先に分岐する。
+            // licensegate/weights はJV-Link/UmaConnのCOM初期化を必要としないため、他のモードより先に分岐する。
+            // サブコマンド解析側はmode(args[0])を含まない配列を期待するため、先頭要素を除いて渡す。
+            var subArgs = args.Length > 0 ? args.Skip(1).ToArray() : args;
+
             if (mode == "licensegate")
             {
                 using (var store = new LicenseGateStore(AppConfig.HistoricalDbPath))
                 {
-                    RunLicenseGateCommand(store, args);
+                    RunLicenseGateCommand(store, subArgs);
+                }
+                return;
+            }
+            if (mode == "weights")
+            {
+                using (var historical = new HistoricalDataStore(AppConfig.HistoricalDbPath))
+                using (var scoresStore = new ScoresStore(historical.Connection))
+                {
+                    RunWeightsCommand(scoresStore, subArgs);
                 }
                 return;
             }
@@ -152,10 +165,11 @@ namespace KeibaDataCollector
                             AppConfig.WordPressAppPassword);
 
                         using (var store = new HistoricalDataStore(AppConfig.HistoricalDbPath))
+                        using (var scoresStore = new ScoresStore(store.Connection))
                         {
                             var scoring = new FactorScoringService(store);
-                            RunScoreFor(jvLink, wp, scoring, targetDate);
-                            RunScoreFor(umaConn, wp, scoring, targetDate);
+                            RunScoreFor(jvLink, wp, scoring, scoresStore, targetDate);
+                            RunScoreFor(umaConn, wp, scoring, scoresStore, targetDate);
                         }
                         break;
                     }
@@ -221,7 +235,7 @@ namespace KeibaDataCollector
 
         private static void PrintUsage()
         {
-            Console.WriteLine("使い方: KeibaDataCollector.exe [setup|morning|predict|score|watch|probe|backfill|dbstats|licensegate]");
+            Console.WriteLine("使い方: KeibaDataCollector.exe [setup|morning|predict|score|watch|probe|backfill|dbstats|licensegate|weights]");
             Console.WriteLine("  setup       : 初回のみ。利用キー等をGUIダイアログで設定する。");
             Console.WriteLine("  morning     : 朝一バッチ。当日の出走表を取得しWordPressへ反映する。");
             Console.WriteLine("  predict     : 朝一オッズの人気順から予想印を生成しWordPressへ反映する。");
@@ -237,6 +251,7 @@ namespace KeibaDataCollector
             Console.WriteLine("              ソースを絞る場合: backfill jv / backfill uma");
             Console.WriteLine("  dbstats     : backfillで蓄積したSQLiteの件数・日付範囲を確認する。");
             Console.WriteLine("  licensegate : LicenseGate（公開許諾状態）の確認・更新。詳細は `licensegate` (引数なし) 実行。");
+            Console.WriteLine("  weights     : AI指数6ファクターの重み設定の確認・更新。詳細は `weights` (引数なし) 実行。");
         }
 
         /// <summary>例外の内容をログに残す。原因調査には型と発生箇所が要るため、
@@ -342,12 +357,12 @@ namespace KeibaDataCollector
             }
         }
 
-        private static void RunScoreFor(JvSpecComDataSource source, WordPressClient wp, FactorScoringService scoring, DateTime targetDate)
+        private static void RunScoreFor(JvSpecComDataSource source, WordPressClient wp, FactorScoringService scoring, ScoresStore scoresStore, DateTime targetDate)
         {
             try
             {
                 source.Initialize(AppConfig.JvLinkSoftwareId);
-                new FactorPublishService(source, wp, scoring).RunForToday(targetDate);
+                new FactorPublishService(source, wp, scoring, scoresStore).RunForToday(targetDate);
             }
             catch (Exception ex)
             {
@@ -497,6 +512,59 @@ namespace KeibaDataCollector
             Console.WriteLine("  KeibaDataCollector.exe licensegate set-jra <active|inactive> <approved|pending|rejected> <approved|pending|rejected> [note]");
             Console.WriteLine("  KeibaDataCollector.exe licensegate set-local <venueId> <venueName> <active|inactive> <approved|pending|rejected> [note]");
             Console.WriteLine("  KeibaDataCollector.exe licensegate check <venueId> <central|local>");
+        }
+
+        // ---- weights（AI指数の重み設定。仕様書§8） ----
+
+        private static void RunWeightsCommand(ScoresStore store, string[] args)
+        {
+            if (args.Length < 1)
+            {
+                PrintWeightsUsage();
+                return;
+            }
+
+            switch (args[0])
+            {
+                case "show":
+                    // segment省略時は "default" を見せる。
+                    var segment = args.Length > 1 ? args[1] : ScoresStore.DefaultSegment;
+                    var w = store.GetWeights(segment);
+                    Console.WriteLine($"[weights] segment={segment} (フォールバック込み表示):");
+                    Console.WriteLine($"  bias={w.WeightBias} pace={w.WeightPace} agariQ={w.WeightAgariQ} " +
+                        $"jockeyRoi={w.WeightJockeyRoi} pedigreeFit={w.WeightPedigreeFit} trainingAcc={w.WeightTrainingAcc}");
+                    return;
+
+                case "set":
+                    // weights set <segment> <bias> <pace> <agariQ> <jockeyRoi> <pedigreeFit> <trainingAcc>
+                    // segment例: "default", "central:turf", "central:dirt", "local:turf", "local:dirt", "central", "local"
+                    if (args.Length < 8) { PrintWeightsUsage(); return; }
+                    store.SetWeights(new AiIndexWeights
+                    {
+                        Segment = args[1],
+                        WeightBias = double.Parse(args[2]),
+                        WeightPace = double.Parse(args[3]),
+                        WeightAgariQ = double.Parse(args[4]),
+                        WeightJockeyRoi = double.Parse(args[5]),
+                        WeightPedigreeFit = double.Parse(args[6]),
+                        WeightTrainingAcc = double.Parse(args[7]),
+                    });
+                    Console.WriteLine($"[weights] segment={args[1]} の重みを更新しました。");
+                    return;
+
+                default:
+                    PrintWeightsUsage();
+                    return;
+            }
+        }
+
+        private static void PrintWeightsUsage()
+        {
+            Console.WriteLine("使い方:");
+            Console.WriteLine("  KeibaDataCollector.exe weights show [segment]");
+            Console.WriteLine("  KeibaDataCollector.exe weights set <segment> <bias> <pace> <agariQ> <jockeyRoi> <pedigreeFit> <trainingAcc>");
+            Console.WriteLine("  segment例: default / central / local / central:turf / central:dirt / local:turf / local:dirt");
+            Console.WriteLine("  未設定のsegmentを照会するとdefaultにフォールバックし、defaultも無ければ全項目1.0を返します。");
         }
     }
 }

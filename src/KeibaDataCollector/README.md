@@ -4,7 +4,7 @@
 同一構成のWindows常駐アプリ）を土台に、JRAVAN＋競馬最強の法則WEB 全自動AI競馬データシステム仕様書の
 各コンポーネントを追加していくプロジェクト。詳細は [`DEVELOPMENT_PLAN.md`](../../DEVELOPMENT_PLAN.md) を参照。
 
-## 現状（Issue #2まで: 既存機能のポート + LicenseGate土台）
+## 現状（Issue #3まで: 既存機能のポート + LicenseGate土台 + AI指数エンジン）
 
 `horse-race-custom-builder` の実装をそのまま移植し、このリポジトリ単体で既存システムと同等の
 コマンド一式（`setup` / `morning` / `predict` / `score` / `watch` / `probe` / `backfill` / `dbstats`）
@@ -47,6 +47,29 @@ KeibaDataCollector.exe licensegate set-jra active approved approved "2026-xx-xx 
 KeibaDataCollector.exe licensegate set-local 35 盛岡 active approved "2026-xx-xx 契約書PDF確認済み"
 KeibaDataCollector.exe licensegate check 35 local
 ```
+
+## AI指数エンジン（仕様書§8・§9）
+
+`score`コマンド実行時に、既存の6ファクター算出（`FactorScoringService`、変更なし）に加えて
+`Services/AiIndexService.cs`が単一の「AI指数」へ加重平均で統合し、`scores`テーブルへ保存する。
+
+- 加重平均は **Σ(値×重み) / Σ(重み)**（算出できた＝null出ないファクターのみ対象）。単純合計では
+  ないので、算出できたファクター数が多い馬が自動的に有利になることはない
+  （horse-race-custom-builderのフロントエンドで実際に発生した不具合の教訓。同READMEを参照）
+- 重みは`score_weights`テーブルのDB設定値。セグメント（`central`/`local` × `turf`/`dirt`、
+  例: `central:turf`）ごとに個別設定でき、未設定なら`default`→全項目1.0の順にフォールバックする
+- `model_version`（採点式のバージョン）・`feature_version`（特徴量抽出ロジックのバージョン）・
+  `data_cutoff_utc`（その算出が見たデータの基準時刻）を毎回の算出結果に必ず付与する
+- 取消・除外馬（SEレコードの異常区分コード≠0）はAI指数TOP5から自動的に除外される
+- AI指数TOP5は開催場（開催日×競馬場）全体で上位5頭。同点はデータ充足率→馬番の順でタイブレーク
+
+```
+KeibaDataCollector.exe weights show central:turf
+KeibaDataCollector.exe weights set central:turf 1.2 1.0 1.0 1.5 0.8 1.0
+```
+
+WordPressへのAI指数TOP5の実publishはまだ無い（算出結果はscoreコマンド実行時にコンソールへログ出力
+されるのみ）。Content Generator（Issue #5）・WordPress Publisher拡張（Issue #7）で接続する。
 
 ## ビルドについて
 
