@@ -3,13 +3,33 @@
     KeibaDataCollector の朝一バッチ／確定監視をタスクスケジューラへ登録する。
 
 .DESCRIPTION
-    2つのタスクを作成します。
+    仕様書§12「自動更新スケジュール」に対応する全タスクを作成します。
 
-      KeibaDataCollector-Morning : 毎日 -MorningTime に scheduled-morning.bat
-      KeibaDataCollector-Predict : 毎日 -PredictTime に scheduled-predict.bat
-      KeibaDataCollector-Watch   : 毎日 -WatchTime   に scheduled-watch.bat
+      KeibaDataCollector-Morning              : 毎日 -MorningTime              に scheduled-morning.bat（早朝）
+      KeibaDataCollector-BackfillIncremental   : 毎日 -BackfillTime             に scheduled-backfill.bat incremental（深夜）
+      KeibaDataCollector-Score                 : 毎日 -ScoreTime               から繰り返し scheduled-score.bat（朝〜発走前〜レース間）
+      KeibaDataCollector-TrendMorning          : 毎日 -TrendMorningTime        に scheduled-trend.bat morning（朝）
+      KeibaDataCollector-TrendLive             : 毎日 -TrendLiveTime           から繰り返し scheduled-trend.bat live（開催中）
+      KeibaDataCollector-Content                : 毎日 -ContentTime            から繰り返し scheduled-content.bat（発走前〜レース間）
+      KeibaDataCollector-Predict               : 毎日 -PredictTime             から繰り返し scheduled-predict.bat
+      KeibaDataCollector-Watch                 : 毎日 -WatchTime               に scheduled-watch.bat（レース間）
+      KeibaDataCollector-TrendFinal            : 毎日 -TrendFinalTime          に scheduled-trend.bat final（開催終了後）
+      KeibaDataCollector-Verify                : 毎日 -VerifyTime              に scheduled-verify.bat（開催終了後）
+      KeibaDataCollector-Dashboard             : 毎日 -DashboardTime           から繰り返し scheduled-dashboard.bat（日中）
 
     watch モードは当日の全レースが確定すると自身で終了するため、停止トリガーは不要です。
+
+    このスクリプトはIssue #2の移植時点ではMorning/Predict/Watchの3タスクしか登録していなかった
+    （移植元に元々あった`backfill incremental`すら未登録だった）。Issue #3〜#14で追加した
+    score/trend/content/verifyやIssue #9のdashboardは、対応する`scheduled-*.bat`は存在するのに
+    タスクスケジューラへの登録が無く、運用者が手動実行しない限り「全自動」になっていなかった
+    （仕様書全体の再チェックで発覚。Issue #15）。
+
+    「前日夜: 翌日開催場・出走予定を準備」（仕様書§12）に対応する専用タスクは意図的に作っていない。
+    出馬表は開催日より前に配信されるため（JV-Data仕様書）、`morning`は当日分を早朝に取得すれば
+    間に合う設計のまま（既存のRaceDiscovery/RaceCardServiceが対象日を"ThisWeekAndToday"で
+    取得済み）。前日時点で「翌日」を明示的に対象にするモードはコマンド側に無く、それを追加するには
+    C#側の変更が必要なため本スクリプトの範囲外とした。
 
     重要な前提:
       JV-Link / UmaConn の利用キーは「setup を実行したWindowsユーザー」の
@@ -48,6 +68,15 @@ param(
     [string] $MorningTime = '07:00',
     [string] $PredictTime = '09:00',
     [string] $WatchTime = '09:30',
+    # 以下、仕様書§12対応で追加したタスクの時刻。深夜→早朝→朝→発走前/レース間→開催終了後、の順。
+    [string] $BackfillTime = '02:00',
+    [string] $ScoreTime = '07:30',
+    [string] $TrendMorningTime = '07:45',
+    [string] $TrendLiveTime = '09:00',
+    [string] $ContentTime = '07:40',
+    [string] $TrendFinalTime = '21:30',
+    [string] $VerifyTime = '22:00',
+    [string] $DashboardTime = '07:00',
     [switch] $RunOnlyWhenLoggedOn = $true
 )
 
@@ -60,11 +89,17 @@ $script:TasksToResume = @()
 $morningBat = Join-Path $scriptDir 'scheduled-morning.bat'
 $predictBat = Join-Path $scriptDir 'scheduled-predict.bat'
 $watchBat = Join-Path $scriptDir 'scheduled-watch.bat'
+$backfillBat = Join-Path $scriptDir 'scheduled-backfill.bat'
+$scoreBat = Join-Path $scriptDir 'scheduled-score.bat'
+$trendBat = Join-Path $scriptDir 'scheduled-trend.bat'
+$contentBat = Join-Path $scriptDir 'scheduled-content.bat'
+$verifyBat = Join-Path $scriptDir 'scheduled-verify.bat'
+$dashboardBat = Join-Path $scriptDir 'scheduled-dashboard.bat'
 $exePath = Join-Path $scriptDir 'bin\Debug\net48\KeibaDataCollector.exe'
 $secrets = Join-Path $scriptDir 'secrets.local.bat'
 
 # --- 事前チェック ------------------------------------------------------------
-foreach ($required in @($morningBat, $predictBat, $watchBat, $exePath)) {
+foreach ($required in @($morningBat, $predictBat, $watchBat, $backfillBat, $scoreBat, $trendBat, $contentBat, $verifyBat, $dashboardBat, $exePath)) {
     if (-not (Test-Path $required)) {
         throw "必要なファイルが見つかりません: $required`nビルド済みか確認してください（dotnet build -c Debug）。"
     }
@@ -85,12 +120,20 @@ function Register-KeibaTask {
         [string] $BatPath,
         [string] $StartTime,
         [string] $Description,
+        # scheduled-trend.batのように %1 で段階（morning/live/final）を要求するbatに渡す引数。
+        # 空文字なら引数無しで呼ぶ（他のbatは%1省略時=当日として動くため）。
+        [string] $Argument = '',
         # 指定すると、開始時刻から $RepeatFor の間、$RepeatEvery ごとに繰り返し実行する。
         [timespan] $RepeatEvery,
         [timespan] $RepeatFor
     )
 
-    $action = New-ScheduledTaskAction -Execute $BatPath -WorkingDirectory $scriptDir
+    if ($Argument) {
+        $action = New-ScheduledTaskAction -Execute $BatPath -Argument $Argument -WorkingDirectory $scriptDir
+    }
+    else {
+        $action = New-ScheduledTaskAction -Execute $BatPath -WorkingDirectory $scriptDir
+    }
     $trigger = New-ScheduledTaskTrigger -Daily -At $StartTime
 
     # 速報オッズは「対象レースの勝ち馬投票券発売以降」にしか提供されない
@@ -168,6 +211,39 @@ Register-KeibaTask -TaskName 'KeibaDataCollector-Predict' -BatPath $predictBat -
 
 Register-KeibaTask -TaskName 'KeibaDataCollector-Watch' -BatPath $watchBat -StartTime $WatchTime `
     -Description 'レース確定を監視し、結果・払戻をWordPressへ随時反映する。全レース確定で自動終了する'
+
+# --- ここから仕様書§12対応で追加したタスク（Issue #15） -----------------------
+
+Register-KeibaTask -TaskName 'KeibaDataCollector-BackfillIncremental' -BatPath $backfillBat -StartTime $BackfillTime `
+    -Description '深夜: 6ファクター/AI指数用の履歴データを差分取得する（option=Normal、ダイアログ無し）'
+
+Register-KeibaTask -TaskName 'KeibaDataCollector-Score' -BatPath $scoreBat -StartTime $ScoreTime `
+    -Description '朝〜発走前〜レース間: 当日出走馬のAI指数を算出しscoresテーブル・hrc_factorsへ反映する（繰り返し。取消・騎手変更・馬場変更の再計算もこの再実行で反映される）' `
+    -RepeatEvery (New-TimeSpan -Minutes 20) -RepeatFor (New-TimeSpan -Hours 14)
+
+Register-KeibaTask -TaskName 'KeibaDataCollector-TrendMorning' -BatPath $trendBat -StartTime $TrendMorningTime `
+    -Argument 'morning' `
+    -Description '朝: 過去データ+当日確定の天候・馬場状態から事前想定傾向を算出する（1回のみ）'
+
+Register-KeibaTask -TaskName 'KeibaDataCollector-TrendLive' -BatPath $trendBat -StartTime $TrendLiveTime `
+    -Argument 'live' `
+    -Description '開催中: ここまでの当日結果から現時点の傾向を算出する（繰り返し）' `
+    -RepeatEvery (New-TimeSpan -Minutes 30) -RepeatFor (New-TimeSpan -Hours 12)
+
+Register-KeibaTask -TaskName 'KeibaDataCollector-Content' -BatPath $contentBat -StartTime $ContentTime `
+    -Description '発走前〜レース間: 狙い馬・穴馬・危険な人気馬を生成・検証し、AI指数TOP5・傾向とまとめてWordPressへ公開する（繰り返し。Scoreの後に走るよう開始時刻をずらしてある）' `
+    -RepeatEvery (New-TimeSpan -Minutes 20) -RepeatFor (New-TimeSpan -Hours 14)
+
+Register-KeibaTask -TaskName 'KeibaDataCollector-TrendFinal' -BatPath $trendBat -StartTime $TrendFinalTime `
+    -Argument 'final' `
+    -Description '開催終了後: 全当日結果から本日の結果分析を算出する（1回のみ）'
+
+Register-KeibaTask -TaskName 'KeibaDataCollector-Verify' -BatPath $verifyBat -StartTime $VerifyTime `
+    -Description '開催終了後: predictionsを確定着順と突き合わせ、verificationへ記録する（1回のみ）'
+
+Register-KeibaTask -TaskName 'KeibaDataCollector-Dashboard' -BatPath $dashboardBat -StartTime $DashboardTime `
+    -Description '日中: 監視ダッシュボード（仕様書§17）をWordPressへ送信する（繰り返し）' `
+    -RepeatEvery (New-TimeSpan -Minutes 30) -RepeatFor (New-TimeSpan -Hours 15)
 
 # 登録し直したことで停止したタスクを再開する。
 # ここを忘れると、日中に更新した日はその後のレースが反映されないまま終わる。
