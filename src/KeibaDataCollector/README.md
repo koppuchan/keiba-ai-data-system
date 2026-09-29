@@ -4,7 +4,7 @@
 同一構成のWindows常駐アプリ）を土台に、JRAVAN＋競馬最強の法則WEB 全自動AI競馬データシステム仕様書の
 各コンポーネントを追加していくプロジェクト。詳細は [`DEVELOPMENT_PLAN.md`](../../DEVELOPMENT_PLAN.md) を参照。
 
-## 現状（Issue #5まで: 既存機能のポート + LicenseGate土台 + AI指数エンジン + Trend Engine + Content Generator）
+## 現状（Issue #6まで: 既存機能のポート + LicenseGate + AI指数エンジン + Trend Engine + Content Generator + Validator）
 
 `horse-race-custom-builder` の実装をそのまま移植し、このリポジトリ単体で既存システムと同等の
 コマンド一式（`setup` / `morning` / `predict` / `score` / `watch` / `probe` / `backfill` / `dbstats`）
@@ -117,8 +117,27 @@ KeibaDataCollector.exe content
 KeibaDataCollector.exe content 2026-08-30
 ```
 
-WordPressへの実publishはまだ無い（コンソールへログ出力のみ。Issue #6 Validator・Issue #7
-Publisherで接続）。
+WordPressへの実publishはまだ無い（コンソールへログ出力のみ。Issue #7 Publisherで接続）。
+
+## Validator（仕様書§14・§5 LicenseGate本接続）
+
+`content`コマンド実行時、生成された各GeneratedPickは公開前に`ValidatorService`を必ず通る。
+
+- **DB再照合**: 生成時点で参照していたAI指数・血統登録番号を、今の`scores`テーブルの値と
+  突き合わせる。対象馬が取消・除外になっていたり、血統登録番号が一致しない（馬番の入れ替わり等）、
+  AI指数が許容誤差（±2.0）を超えて変化していれば不合格にする。**馬名での照合は未対応**
+  （表示名を持つマスタテーブルがまだ無いため、より強い一意キーであるketto_numで代用している）
+- **LicenseGate本接続**: `LicenseGateStore.IsWebPublishAllowed(venueId, isCentral)` を呼び、
+  この開催場が今Web公開してよい状態かを判定する。LicenseGate導入（Issue #1）以来、
+  ここが初めての実接続先になる
+- 合否にかかわらず、判定結果は`predictions`テーブルへ**immutableに**保存する（不合格分も残すのは、
+  「なぜ公開されなかったか」を後から追跡できるようにするため。仕様書§17監視ダッシュボードの
+  「公開停止理由」はここが情報源になる想定）。既存行を書き換えるAPIは`PredictionStore`に
+  意図的に用意していない
+
+WordPress公開そのもの（Issue #7）は、この`ValidatorService.Passed`を見て初めて実行される設計にする。
+AI指数TOP5・本日の傾向（Trend Engine）の公開経路には、Issue #7でPublisherを実装する際にまとめて
+LicenseGate/Validatorを通す（公開処理そのものがまだ無いため、現時点では接続先がない）。
 
 ## ビルドについて
 
