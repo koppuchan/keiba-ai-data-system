@@ -10,7 +10,7 @@ namespace KeibaDataCollector.Services
 {
     /// <summary>
     /// 仕様書§18 レース後の自動検証。predictions（狙い馬/穴馬/危険な人気馬・AI指数TOP5、
-    /// Issue #6/#7でimmutableに保存済み）を確定着順と突き合わせ、的中率を集計可能な形で
+    /// immutableに保存済み）を確定着順と突き合わせ、的中率を集計可能な形で
     /// verificationテーブルへ保存する。
     ///
     /// 確定着順は当日のSEレコードを直接読んで得る（TrendEngineService/ContentGeneratorServiceと

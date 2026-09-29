@@ -1,9 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!--
-    Phase 2 (Issue #2) でJV-Link/UmaConnのCOM連携（32bit専用）を移植する前提のため、
-    PlatformTarget は最初からx86に固定している。System.Data.SQLite.Core もx86ネイティブ
-    バイナリを同梱するため、ここで揃えておかないと後で作り直しになる。
+    JV-Link/UmaConnのCOM連携が32bit専用のため、PlatformTarget はx86に固定している。
+    System.Data.SQLite.Core もx86ネイティブバイナリを同梱するため、ここで揃える必要がある。
   -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>

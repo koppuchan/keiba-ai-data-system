@@ -6,12 +6,9 @@ JRAVAN＋競馬最強の法則WEB 中央・地方競馬 全自動AI競馬デー�
 [`horse-race-custom-builder`](https://github.com/koppuchan/horse-race-custom-builder)）を土台に、
 LicenseGate・傾向分析・コンテンツ自動生成・Validator・監視ダッシュボードを追加していくプロジェクト。
 
-- 開発計画・フェーズ構成: [`DEVELOPMENT_PLAN.md`](DEVELOPMENT_PLAN.md)
-- QA・受け入れ基準チェック: [`QA_REPORT.md`](QA_REPORT.md)
-- 収集アプリ本体: [`src/KeibaDataCollector/`](src/KeibaDataCollector/)
+- 収集アプリ本体: [`src/KeibaDataCollector/`](src/KeibaDataCollector/)（コマンド一覧・運用手順は同ディレクトリのREADME参照）
 - WordPress companion プラグイン: [`src/wordpress-plugin/keiba-ai-digest/`](src/wordpress-plugin/keiba-ai-digest/)
   （AI指数TOP5・本日の傾向・狙い馬/穴馬/危険な人気馬。既存の`keiba-race-sync`とは別プラグイン）
-- 進行管理: GitHub Issues（[Issue一覧](https://github.com/koppuchan/keiba-ai-data-system/issues)、1フェーズ1Issue・1PR）
 
 ## 着手前の前提
 

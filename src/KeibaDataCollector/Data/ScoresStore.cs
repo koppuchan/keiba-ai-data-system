@@ -15,7 +15,7 @@ namespace KeibaDataCollector.Data
     ///   feature_version・data_cutoff_utcを必ず保存する（仕様書§8）。
     ///
     /// 「予測時点のデータをimmutableに残す」こと自体は仕様書§18 Verification DBの責務
-    /// （Issue #8で別テーブルpredictionsに実装）。このテーブルは「現時点の最新指数」を
+    /// （別テーブルpredictionsに実装）。このテーブルは「現時点の最新指数」を
     /// 引き直すためのキャッシュという位置づけで、再計算のたびに上書きしてよい。
     /// </summary>
     public class ScoresStore : IDisposable

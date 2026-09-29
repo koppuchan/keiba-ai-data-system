@@ -42,7 +42,7 @@ namespace KeibaDataCollector.Models
     }
 
     /// <summary>生成された1件のコンテンツ。文章は構造化データの値のみを埋め込んだテンプレートで、
-    /// AIに数値や馬番を自由生成させない（仕様書§14）。Reasonsは検証用の根拠（Validator/Issue #6が
+    /// AIに数値や馬番を自由生成させない（仕様書§14）。Reasonsは検証用の根拠（Validatorが
     /// 元データと突き合わせる際に使う想定）。</summary>
     public class GeneratedPick
     {
@@ -54,7 +54,7 @@ namespace KeibaDataCollector.Models
         public string Text { get; set; }
         public List<string> Reasons { get; set; } = new List<string>();
 
-        /// <summary>生成時点で参照した実データ。Validator（仕様書§14・Issue #6）が
+        /// <summary>生成時点で参照した実データ。Validator（仕様書§14）が
         /// 公開直前にDBの「今」の値と突き合わせて不一致を検知するための基準値。
         /// Reasonsは人間可読なログ用の文字列のため、機械的な再照合にはこちらを使う。</summary>
         public double? AiIndexAtGeneration { get; set; }
@@ -65,11 +65,10 @@ namespace KeibaDataCollector.Models
         public string JockeyCodeAtGeneration { get; set; }
 
         /// <summary>生成時点の馬名。仕様書§14「馬名・馬番・指数・レース番号をDBと照合」の
-        /// 馬名照合に使う（Issue #13）。</summary>
+        /// 馬名照合に使う。</summary>
         public string HorseNameAtGeneration { get; set; }
 
-        /// <summary>生成時点の馬場状態コード。仕様書§21「馬場変更が反映される」の検知に使う
-        /// （Issue #14）。</summary>
+        /// <summary>生成時点の馬場状態コード。仕様書§21「馬場変更が反映される」の検知に使う。</summary>
         public string BabaConditionCodeAtGeneration { get; set; }
     }
 

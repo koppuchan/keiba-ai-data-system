@@ -103,12 +103,12 @@ namespace KeibaDataCollector.Models
         public string JockeyCode { get; set; }
 
         /// <summary>SEレコードの馬名（Bamei）。仕様書§14「生成後、馬名・馬番・指数・レース番号を
-        /// DBと照合」のうち馬名照合に使う（Issue #13）。</summary>
+        /// DBと照合」のうち馬名照合に使う。</summary>
         public string HorseName { get; set; }
 
         /// <summary>RAレコードの馬場状態コード（芝ならSibaBabaCD、ダートならDirtBabaCD。
         /// FactorPublishService.BabaConditionForで選択）。仕様書§21「馬場変更が反映される」の
-        /// 検知に使う（Issue #14）。AI指数6ファクター自体はこの値を入力に使わない
+        /// 検知に使う。AI指数6ファクター自体はこの値を入力に使わない
         /// （記録・照合専用）。</summary>
         public string BabaConditionCode { get; set; }
 
@@ -159,7 +159,7 @@ namespace KeibaDataCollector.Models
         public int Umaban { get; set; }
         public string KettoNum { get; set; }
 
-        /// <summary>算出時点の馬名。仕様書§14の馬名照合、および表示用（Issue #13）。</summary>
+        /// <summary>算出時点の馬名。仕様書§14の馬名照合、および表示用。</summary>
         public string HorseName { get; set; }
 
         /// <summary>算出時点の騎手コード。仕様書§15「騎手変更→再計算」の検知に使う
@@ -167,7 +167,7 @@ namespace KeibaDataCollector.Models
         public string JockeyCode { get; set; }
 
         /// <summary>算出時点の馬場状態コード。仕様書§21「馬場変更が反映される」の検知に使う
-        /// （Issue #14。AI指数自体はこの値を入力に使わない、記録・照合専用）。</summary>
+        /// （AI指数自体はこの値を入力に使わない、記録・照合専用）。</summary>
         public string BabaConditionCode { get; set; }
 
         public FactorScores Factors { get; set; }

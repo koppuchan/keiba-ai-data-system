@@ -11,16 +11,14 @@ namespace KeibaDataCollector.Data
     ///
     /// 大前提: 「データを取得できる」と「そのデータをWebで公開できる」は別問題として扱う
     /// （仕様書末尾「開発者への最終指示」）。このクラスはその判定だけを担い、実際の取得処理・
-    /// 公開処理には一切関与しない（取得はPhase 2のSource Adapter、公開はPhase 7のPublisherが
+    /// 公開処理には一切関与しない（Source AdapterがJV-Link/UmaConnから取得し、Publisherが
     /// このクラスの IsWebPublishAllowed() を呼んで判定を仰ぐ）。
     ///
     /// フェイルクローズが必須方針: 設定行が無い・承認状態が不明な場合は「非公開」を返す。
     /// 「取得さえできれば公開してよい」という設計には絶対にしない。
     ///
-    /// DBファイルはHistoricalDataStoreと同じ historical.sqlite3 を共有する想定
-    /// （DEVELOPMENT_PLAN.md §2）。このクラス単体でも新規DBに対してテーブルを作成できるように
-    /// EnsureSchema を独立して持たせてあるが、Phase 2でHistoricalDataStore側からも
-    /// 同じEnsureSchemaパターンで呼ばれるようになる想定。
+    /// DBファイルはHistoricalDataStoreと同じ historical.sqlite3 を共有する。このクラス単体でも
+    /// 新規DBに対してテーブルを作成できるようEnsureSchemaを独立して持たせている。
     /// </summary>
     public class LicenseGateStore : IDisposable
     {
@@ -195,7 +193,7 @@ namespace KeibaDataCollector.Data
                 });
         }
 
-        // ---- ゲート判定（Phase 6でPublisherから呼ばれる本体） ----
+        // ---- ゲート判定（Publisherから呼ばれる本体） ----
 
         /// <summary>この開催場のレースをWordPressへ公開してよいかを判定する。
         /// 中央競馬か地方競馬かで参照するテーブルが変わる。

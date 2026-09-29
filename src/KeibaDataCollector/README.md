@@ -1,18 +1,9 @@
 # KeibaDataCollector
 
-`keiba-race-result-auto-posting` / `horse-race-custom-builder`（既存稼働中システム、同じ開発者による
-同一構成のWindows常駐アプリ）を土台に、JRAVAN＋競馬最強の法則WEB 全自動AI競馬データシステム仕様書の
-各コンポーネントを追加していくプロジェクト。詳細は [`DEVELOPMENT_PLAN.md`](../../DEVELOPMENT_PLAN.md) を参照。
-
-## 現状（Issue #15まで: 全機能実装済み・QA完了・自動更新スケジュール登録済み。実機ビルド・動作確認は未実施）
+`keiba-race-result-auto-posting` / `horse-race-custom-builder`（既存稼働中システム、同一開発者による
+同一構成のWindows常駐アプリ）を土台にした、JRAVAN＋競馬最強の法則WEB 全自動AI競馬データシステム。
 
 仕様書の全コンポーネント（Source Adapter〜Verification DB、LicenseGate、監視ダッシュボード）を実装済み。
-受け入れ基準（仕様書§21）のコードレビューによる確認結果は [`../../QA_REPORT.md`](../../QA_REPORT.md) を参照。
-
-`horse-race-custom-builder` の実装をそのまま移植し、このリポジトリ単体で既存システムと同等の
-コマンド一式（`setup` / `morning` / `predict` / `score` / `watch` / `probe` / `backfill` / `dbstats`）
-が揃っている状態。挙動は移植元と同じで、仕様書独自の新機能（Trend Engine・Content Generator・
-Validator等）はまだ無い。移植元との差分は `licensegate` コマンドの追加のみ。
 
 ```
 KeibaDataCollector.exe setup       # 初回のみ。利用キー等をGUIダイアログで登録
@@ -23,18 +14,22 @@ KeibaDataCollector.exe score       # 6ファクター算出→WordPress(hrc_fact
 KeibaDataCollector.exe backfill    # 6ファクター用の過去データ取得
 KeibaDataCollector.exe probe       # 調査用: どのデータ種別で何が取れるか確認（WordPressへ書き込まない）
 KeibaDataCollector.exe dbstats     # 蓄積済みSQLiteの件数・日付範囲を確認
+KeibaDataCollector.exe trend       # 本日の傾向（脚質・枠・馬場・上がり・通過順）を算出
+KeibaDataCollector.exe content     # 狙い馬・穴馬・危険な人気馬を生成・検証・公開
+KeibaDataCollector.exe verify      # predictionsを確定着順と突き合わせて検証
+KeibaDataCollector.exe stats       # 指数帯別の3着内率・勝率を表示
 KeibaDataCollector.exe licensegate # LicenseGateの確認・更新（下記）
+KeibaDataCollector.exe weights     # AI指数6ファクターの重み設定の確認・更新
+KeibaDataCollector.exe dashboard   # 監視ダッシュボード（仕様書§17）をコンソール表示・WordPress送信
 ```
 
 運用（`deploy.ps1`によるビルド→再起動手順等）は既存2リポジトリと同じ運用スクリプトをそのまま
 同梱している。詳細な注意点（JV-Link Setup取得は無人実行不可、ダイアログ対策、ページキャッシュ、
 地方競馬のデータ欠損傾向等）は移植元リポジトリのREADMEに記載されている運用知見がそのまま当てはまる。
 
-**Windows Task Scheduler登録**（`register-scheduled-tasks.ps1`）は、移植直後（Issue #2）は移植元と
-同じMorning/Predict/Watchの3タスクしか登録しておらず、Issue #3〜#14で追加したscore/trend/content/
-verify/dashboard（および移植元に元々あった`backfill incremental`）は`scheduled-*.bat`があるのに
-未登録のままだった（仕様書全体の再チェックで発覚。Issue #15で対応）。現在は仕様書§12の自動更新
-スケジュール表に沿って以下をすべて登録する。
+## Windows Task Scheduler登録
+
+`register-scheduled-tasks.ps1` が、仕様書§12の自動更新スケジュール表に沿って以下をすべて登録する。
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\register-scheduled-tasks.ps1
@@ -55,7 +50,7 @@ powershell -ExecutionPolicy Bypass -File .\register-scheduled-tasks.ps1
 | `KeibaDataCollector-Verify` | 22:00（1回） | 開催終了後: レース後検証 |
 
 「前日夜: 翌日開催場・出走予定を準備」（仕様書§12）に対応する専用タスクは意図的に作っていない
-（`morning`は当日分を早朝に取得すれば間に合う設計のままのため。詳細はスクリプト冒頭のコメント参照）。
+（`morning`は当日分を早朝に取得すれば間に合う設計のため。詳細はスクリプト冒頭のコメント参照）。
 
 ## LicenseGate（仕様書§5）
 
@@ -67,9 +62,6 @@ powershell -ExecutionPolicy Bypass -File .\register-scheduled-tasks.ps1
   `local_venue_license` に venue_id ごとの行
 - **未設定・行が存在しない場合は常に非公開（フェイルクローズ）**。取得可否はこの判定に一切関与しない
 
-WordPress Publisherへの実接続はまだ無い（Issue #6 Validator / Issue #7 Publisherで接続）。
-現時点ではCLIから状態を確認・更新できるだけ。
-
 ```
 KeibaDataCollector.exe licensegate show
 KeibaDataCollector.exe licensegate set-jra active approved approved "2026-xx-xx JRA-VANより書面確認"
@@ -79,12 +71,11 @@ KeibaDataCollector.exe licensegate check 35 local
 
 ## AI指数エンジン（仕様書§8・§9）
 
-`score`コマンド実行時に、既存の6ファクター算出（`FactorScoringService`、変更なし）に加えて
-`Services/AiIndexService.cs`が単一の「AI指数」へ加重平均で統合し、`scores`テーブルへ保存する。
+`score`コマンド実行時に、6ファクター算出（`FactorScoringService`）に加えて`Services/AiIndexService.cs`
+が単一の「AI指数」へ加重平均で統合し、`scores`テーブルへ保存する。
 
-- 加重平均は **Σ(値×重み) / Σ(重み)**（算出できた＝null出ないファクターのみ対象）。単純合計では
+- 加重平均は **Σ(値×重み) / Σ(重み)**（算出できた＝nullでないファクターのみ対象）。単純合計では
   ないので、算出できたファクター数が多い馬が自動的に有利になることはない
-  （horse-race-custom-builderのフロントエンドで実際に発生した不具合の教訓。同READMEを参照）
 - 重みは`score_weights`テーブルのDB設定値。セグメント（`central`/`local` × `turf`/`dirt`、
   例: `central:turf`）ごとに個別設定でき、未設定なら`default`→全項目1.0の順にフォールバックする
 - `model_version`（採点式のバージョン）・`feature_version`（特徴量抽出ロジックのバージョン）・
@@ -98,7 +89,7 @@ KeibaDataCollector.exe weights set central:turf 1.2 1.0 1.0 1.5 0.8 1.0
 ```
 
 `score`コマンド実行時点ではまだWordPressへ送らず、コンソールへログ出力するのみ。実際の公開は
-`content`コマンド実行時に`DigestPublisherService`がまとめて行う（後述のWordPress Publisher拡張参照）。
+`content`コマンド実行時に`DigestPublisherService`がまとめて行う（後述）。
 
 ## Trend Engine（仕様書§10 本日の傾向）
 
@@ -116,13 +107,13 @@ KeibaDataCollector.exe trend final     # 終了後、全当日結果で集計
   断定的な値（先行有利/差し有利等）を出さず、サンプル数だけを保持する
 - 天候・馬場状態は常に当日のRACEデータから直接読む（開催中に馬場状態が変わることがあるため）
 - `morning`段階の通過順傾向（最終コーナー先頭馬の勝率）は`race_entries.final_corner_leader`列
-  （Issue #12で追加。`BackfillService`が最終コーナー通過順位から算出して保存する）を母集団にする。
-  この列が無い旧DB・再backfill前の行は対象から自然に除外されるため、`run-backfill.bat`を
-  再実行していない環境ではサンプル数が少なく出る点に注意
+  （`BackfillService`が最終コーナー通過順位から算出して保存する）を母集団にする。この列が無い
+  旧DB・再backfill前の行は対象から自然に除外されるため、`run-backfill.bat`を再実行していない
+  環境ではサンプル数が少なく出る点に注意
 
 `trend`コマンド実行時点ではまだWordPressへ送らない。`morning`/`live`/`final`いずれの段階も
 `trend_snapshots`に保存されるだけで、`content`コマンド実行時にその時点で保存済みの最新スナップショットを
-`DigestPublisherService`がまとめて公開する（後述）。
+`DigestPublisherService`がまとめて公開する。
 
 ## Content Generator（仕様書§11 今日の狙い馬・穴馬・危険な人気馬）
 
@@ -140,8 +131,7 @@ KeibaDataCollector.exe trend final     # 終了後、全当日結果で集計
   機械的にチェックする
 - 取消・除外馬は、`score`実行時点のスナップショットではなく**生成時点で当日データを読み直して**
   除外する（仕様書§11「取消・騎手変更・馬場変更が未反映なら公開停止または再計算」の取消・除外分に
-  対応）。騎手変更の検知はValidator（Issue #6、Issue #9で拡張）が`scores`テーブルの現在の
-  `jockey_code`と突き合わせて行う。**馬場変更（トラック種別・馬場状態の変化）の検知は未対応**
+  対応）。騎手変更・馬場変更の検知はValidatorが`scores`テーブルの現在の値と突き合わせて行う
 
 ```
 KeibaDataCollector.exe content
@@ -157,13 +147,12 @@ KeibaDataCollector.exe content 2026-08-30
   一致しない（馬番の入れ替わり等）、AI指数が許容誤差（±2.0）を超えて変化していれば不合格にする。
   **騎手変更・馬場変更**（仕様書§15・§21）もここで検知し不合格にする（即時の自動再計算は
   トリガーしない。`score`/`content`は1日に複数回の再実行が前提の設計のため、次回実行で新しい値を
-  反映した予測が自然に生成される。Issue #9で騎手変更、Issue #14で馬場変更に対応）。馬名はSEレコードの
-  `Bamei`を`scores.horse_name`へ保存したものを使う（Issue #13。独立した馬マスタテーブルは無く、
-  あくまでketto_numが一意キーで馬名は補助的な照合・表示用）。馬場状態コード（芝ならSibaBabaCD、
-  ダートならDirtBabaCD）はAI指数6ファクター自体の入力には使わず、記録・照合専用
+  反映した予測が自然に生成される）。馬名はSEレコードの`Bamei`を`scores.horse_name`へ保存したものを
+  使う（独立した馬マスタテーブルは無く、あくまでketto_numが一意キーで馬名は補助的な照合・表示用）。
+  馬場状態コード（芝ならSibaBabaCD、ダートならDirtBabaCD）はAI指数6ファクター自体の入力には使わず、
+  記録・照合専用
 - **LicenseGate本接続**: `LicenseGateStore.IsWebPublishAllowed(venueId, isCentral)` を呼び、
-  この開催場が今Web公開してよい状態かを判定する。LicenseGate導入（Issue #1）以来、
-  ここが初めての実接続先になる
+  この開催場が今Web公開してよい状態かを判定する
 - 合否にかかわらず、判定結果は`predictions`テーブルへ**immutableに**保存する（不合格分も残すのは、
   「なぜ公開されなかったか」を後から追跡できるようにするため。仕様書§17監視ダッシュボードの
   「公開停止理由」はここが情報源になる想定）。既存行を書き換えるAPIは`PredictionStore`に
@@ -180,22 +169,21 @@ TOP5（`ScoresStore.GetVenueTop5`）・本日の傾向（`TrendStore`の朝/開�
 1. **LicenseGate**: `IsWebPublishAllowed`が通らない開催場は送信自体を行わない
 2. **自動公開ON/OFF**: WordPress管理画面（設定 → Keiba AI Digest）のチェックボックスと連動。
    `WordPressClient.IsAutoPublishEnabledAsync`が毎回確認し、取得失敗時も安全側でOFF扱いにする
-3. **Validator未通過ピックの除外**: `content`コマンド内で既にIssue #6のValidatorを通している。
+3. **Validator未通過ピックの除外**: `content`コマンド内で既にValidatorを通している。
    不合格だったピックはpublish対象に含めない
 4. **空コンテンツなら送信しない**: AI指数TOP5・傾向・ピックが全て空ならWordPressへ何も送らない
    （仕様書§13「更新失敗時に空ページ・壊れたページを出さない」と同じ考え方をpublish要否にも適用）
 
-WordPress側の対応プラグインは新規
-[`wordpress-plugin/keiba-ai-digest/`](../wordpress-plugin/keiba-ai-digest/)。**自動公開の既定値はOFF**
-（LicenseGateと同じフェイルクローズ方針）。§13の「手動再実行」は、VPS上で`run-score.bat`/
-`run-content.bat`を対象日指定で再実行する運用のままにしている（WordPress側からVPSの処理を
-起動する経路は、攻撃面を増やさないため意図的に作っていない）。
+WordPress側の対応プラグインは[`wordpress-plugin/keiba-ai-digest/`](../wordpress-plugin/keiba-ai-digest/)。
+**自動公開の既定値はOFF**（LicenseGateと同じフェイルクローズ方針）。§13の「手動再実行」は、
+VPS上で`run-score.bat`/`run-content.bat`を対象日指定で再実行する運用のままにしている
+（WordPress側からVPSの処理を起動する経路は、攻撃面を増やさないため意図的に作っていない）。
 
 ## レース後の自動検証（仕様書§18 Verification DB）
 
-`verify`コマンドで、`predictions`テーブル（狙い馬/穴馬/危険な人気馬はIssue #6のValidator、
-AI指数TOP5はIssue #7のDigestPublisherが、それぞれ公開のタイミングでimmutableにsnapshot済み）を
-当日の確定着順と突き合わせ、`verification`テーブルへ記録する。
+`verify`コマンドで、`predictions`テーブル（狙い馬/穴馬/危険な人気馬はValidatorが、AI指数TOP5は
+DigestPublisherが、それぞれ公開のタイミングでimmutableにsnapshot済み）を当日の確定着順と突き合わせ、
+`verification`テーブルへ記録する。
 
 - 確定着順は当日のSEレコードを直接読んで得る（historical.sqlite3への当日結果の反映はリアルタイムでは
   ないため、TrendEngine/ContentGeneratorと同じ理由で当日データを直接読む）
@@ -225,20 +213,20 @@ KeibaDataCollector.exe stats AiIndexTop5 ai-index-v1
 | エラー | 仕様書の処理 | 対応 |
 |---|---|---|
 | データ取得失敗 | 再試行→失敗なら公開停止＋通知 | JV-Link/UmaConnの読み取りは各サービスが例外を投げ、`Program.LogFailure`が監査ログへ記録（WordPress送信は元から自動再試行あり） |
-| 重要項目欠損 | 公開停止 | Validator（Issue #6）が対象馬未検出・AI指数算出不能を不合格にする |
+| 重要項目欠損 | 公開停止 | Validatorが対象馬未検出・AI指数算出不能を不合格にする |
 | 馬番不一致 | 公開停止 | Validatorが血統登録番号の不一致で不合格にする |
-| 騎手変更 | 再計算 | Validatorが`scores.jockey_code`との不一致を検知して公開停止（Issue #9で追加）。次回の`score`/`content`実行で自然に再計算される |
-| 取消/除外 | ランキングから除外 | AiIndexService/ContentGeneratorServiceが対応済み（Issue #3・#5） |
-| オッズ異常 | 穴馬判定停止 | `JvRecordParser.ParseTanshoOdds`が0円・非数値のオッズを除外済み、穴馬判定もオッズ未取得時は判定しない（Issue #5） |
+| 騎手変更 | 再計算 | Validatorが`scores.jockey_code`との不一致を検知して公開停止。次回の`score`/`content`実行で自然に再計算される |
+| 取消/除外 | ランキングから除外 | AiIndexService/ContentGeneratorServiceが対応済み |
+| オッズ異常 | 穴馬判定停止 | `JvRecordParser.ParseTanshoOdds`が0円・非数値のオッズを除外済み、穴馬判定もオッズ未取得時は判定しない |
 | AI生成失敗 | テンプレートへフォールバック/停止 | この実装はそもそも自由文生成AIを呼ばない（仕様書§14）ため、失敗しうるのは「対象馬なし」のみで、その場合は単にピックを生成しない |
-| WordPress API失敗 | 再試行＋通知 | `WordPressClient`が最大4回再試行済み（Issue #2）。再試行後も失敗すれば例外化し`LogFailure`経由で監査ログへ |
-| LicenseGate未承認 | 公開処理を強制停止 | `DigestPublisherService`/`ValidatorService`が対応済み（Issue #1・#6・#7） |
+| WordPress API失敗 | 再試行＋通知 | `WordPressClient`が最大4回再試行済み。再試行後も失敗すれば例外化し`LogFailure`経由で監査ログへ |
+| LicenseGate未承認 | 公開処理を強制停止 | `DigestPublisherService`/`ValidatorService`が対応済み |
 
 「通知」は`AuditLogStore`（`audit_logs`テーブル）への記録が必須部分。加えて`NotifierService`が
 severity=Criticalのものだけベストエフォートでメール送信する（SMTP未設定なら送信自体を行わない）。
 `Program.LogFailure`はすべてのコマンドの例外処理が最終的に通る1箇所のため、ここに集約することで
-既存の各コマンドを個別に手直しせず横断的にエラーを記録している。成功時も`LogSuccess`で
-`audit_logs`へ記録し、「エラーが無い」と「一度も実行されていない」を区別できるようにしている。
+各コマンドを個別に手直しせず横断的にエラーを記録している。成功時も`LogSuccess`で`audit_logs`へ
+記録し、「エラーが無い」と「一度も実行されていない」を区別できるようにしている。
 
 `dashboard`コマンドで仕様書§17の監視ダッシュボード項目（当日開催場、最終データ同期時刻、
 最終AI計算時刻、最終WordPress更新時刻、データソース接続状態、LicenseGate状態、未処理レース数、
@@ -251,12 +239,25 @@ KeibaDataCollector.exe dashboard
 KeibaDataCollector.exe dashboard 2026-08-30
 ```
 
+## 既知の制約
+
+- **クッション値が取得できない**: 仕様書§3が求める「クッション値」に対応するJV-Dataのdataspec/
+  フィールドが、現在組み込んでいる`JVData_Struct.cs`（JRA-VAN公式SDK）内に見当たらない。地方競馬
+  DATA側に別途存在する可能性はあるが、推測でdataspec名を決め打ちしない方針のため未対応
+- **`venues`/`horses`/`results`の専用マスタテーブルは無い**: 仕様書§7は11テーブルを挙げているが、
+  本実装では`track_code`文字列をキーに扱い、馬名は`scores`/`predictions`の各行に非正規化して保存する
+  設計にしている。`ketto_num`が一意キーであることに変わりはない。レース結果もWordPress側
+  （`race`投稿の`race_result`メタ）が正データで、検証時（`verify`コマンド）はJV-Link/UmaConnから
+  当日分を都度読み直す。機能的には代替できているが、正規化された完全なスキーマではない
+- **地方競馬の馬場種別判定（ばんえい等）**: `AiIndexService.BuildSegment`はTrackCDの先頭1桁で
+  芝/ダートを判定し、該当しない場合（ばんえい等）は開催場単位の重み設定にフォールバックする。
+  専用の指標を別途設計する仕様書§2の要求までは対応していない
+
 ## ビルドについて
 
-JV-Link/UmaConn連携を前提に `PlatformTarget=x86` / `net48` で構成している（Issue #2以降で
-COM相互運用コードが合流する）。**.NET Framework 4.8のビルド環境はWindowsが前提**で、この
-リポジトリの開発は元々Linux上のエージェントから行っているためローカルでは `dotnet build` を
-検証できていない。マージ前に一度Windows機（またはWindows上のCI）でビルドを確認すること。
+JV-Link/UmaConn連携を前提に `PlatformTarget=x86` / `net48` で構成している。**.NET Framework 4.8の
+ビルド環境はWindowsが前提**で、この環境（Linux）では `dotnet build` を検証できていない。
+Windows VPS側で初回ビルドを確認すること。
 
 ## 機密情報の扱い
 

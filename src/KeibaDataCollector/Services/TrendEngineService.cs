@@ -19,7 +19,7 @@ namespace KeibaDataCollector.Services
     /// 当日のRACEデータ（RA+SE）を直接読んで都度集計する（FactorPublishServiceと同じ読み方）。
     ///
     /// 通過順傾向（最終コーナー先頭馬の勝率）の朝段階は、race_entries.final_corner_leader列
-    /// （Issue #12でBackfillServiceに追加）を母集団にする。この列が無いDB・再backfill前の行は
+    /// （BackfillServiceが追加）を母集団にする。この列が無いDB・再backfill前の行は
     /// NULLのままなので、その分だけサンプル数が少なくなる（断定はMinSample未満なら行わない）。
     /// </summary>
     public class TrendEngineService
@@ -383,8 +383,8 @@ namespace KeibaDataCollector.Services
             return new AgariTendency();
         }
 
-        /// <summary>朝段階の通過順傾向（最終コーナー先頭馬の勝率）。Issue #12でBackfillServiceが
-        /// race_entries.final_corner_leaderへ保存するようになった実績データを母集団にする。
+        /// <summary>朝段階の通過順傾向（最終コーナー先頭馬の勝率）。BackfillServiceが
+        /// race_entries.final_corner_leaderへ保存する実績データを母集団にする。
         /// 旧DB・再backfill前の行はNULLのため、AND final_corner_leader IS NOT NULLで自然に除外される
         /// （0件扱いではなく「その行は判定不能」として単に集計対象から外れる）。</summary>
         private PassageTendency ComputeHistoricalPassage(string trackCode)

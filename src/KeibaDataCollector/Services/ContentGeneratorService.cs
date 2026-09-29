@@ -20,7 +20,7 @@ namespace KeibaDataCollector.Services
     /// 当日のSEレコードを読み直して最新の状態で上書きする（仕様書§11「取消・騎手変更・馬場変更が
     /// 未反映なら公開停止または再計算」のうち、取消・除外の再計算を担当）。騎手変更・馬名不一致は
     /// scoresテーブルに算出時の値（jockey_code/horse_name）が保存されているため、公開直前に
-    /// Validator（Issue #6・#9・#13）が現在値と再照合する形でカバーする。</summary>
+    /// Validatorが現在値と再照合する形でカバーする。</summary>
     public class ContentGeneratorService
     {
         private readonly IRaceDataSource _source;

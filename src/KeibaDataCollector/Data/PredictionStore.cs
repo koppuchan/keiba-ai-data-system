@@ -15,7 +15,7 @@ namespace KeibaDataCollector.Data
     ///
     /// そのためInsertのみを公開し、Update系のメソッドは意図的に用意していない。同じ内容を
     /// 再生成した場合は新しいprediction_idで別行として追加する（既存行は一切変更しない）。
-    /// レース後の着順突き合わせ（仕様書§18のverificationテーブル）はIssue #8で別途実装する。
+    /// レース後の着順突き合わせは仕様書§18のverificationテーブル側で別途行う。
     /// </summary>
     public class PredictionStore : IDisposable
     {
@@ -114,7 +114,7 @@ namespace KeibaDataCollector.Data
 
         /// <summary>ある開催場・日の予測（狙い馬/穴馬/危険な人気馬/AI指数TOP5すべて）を全件返す。
         /// 「latest」等での絞り込みは行わない。同じ馬が当日中に複数回予測対象になった場合、
-        /// それぞれが別のprediction_idを持つ別行のままレース後検証（Issue #8）の対象になる
+        /// それぞれが別のprediction_idを持つ別行のままレース後検証の対象になる
         /// （仕様書§18「不的中データも削除せず全件検証に含める」の対象を、再生成で増えた行も
         /// 含めて素直に全件とする解釈）。</summary>
         public System.Collections.Generic.List<PredictionRecord> GetForVenue(DateTime raceDate, string trackCode)

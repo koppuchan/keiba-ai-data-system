@@ -33,8 +33,7 @@ namespace KeibaDataCollector.Services
         private const string EarlyAnchorFromTime = "19860101000000";
 
         /// <summary>SourceNameに"中央"を含むかどうかでJV-Link/UmaConnを判別する。
-        /// IRaceDataSourceインターフェース自体にIsCentral相当のプロパティを追加すると
-        /// Issue #2で既にレビュー中のインターフェースを変更することになるため、
+        /// IRaceDataSourceインターフェース自体にIsCentral相当のプロパティを追加せず、
         /// 既存の公開プロパティ（SourceName）から導出する非侵襲的な方法を選んだ。</summary>
         private bool IsCentral => _source.SourceName.Contains("中央");
 
@@ -223,7 +222,7 @@ namespace KeibaDataCollector.Services
         }
 
         /// <summary>仕様書§9 AI指数TOP5をログ出力する。WordPressへの実publishはContent Generator/
-        /// Publisher側（Issue #5, #7）の責務のため、ここでは算出結果の可視化のみ行う。
+        /// Publisher側の責務のため、ここでは算出結果の可視化のみ行う。
         /// GetVenueTop5自体はpublicなScoresStore経由で他のサービスからも呼べる。</summary>
         private void LogVenueTop5(DateTime targetDate, IEnumerable<string> trackCodes)
         {
@@ -249,7 +248,7 @@ namespace KeibaDataCollector.Services
         /// <summary>そのレースの馬場種別（芝/ダート）に対応する馬場状態コードを選ぶ。
         /// TrackCD（トラックコード）の先頭桁は1x=芝、2x=ダートを表す（AiIndexService.BuildSegmentの
         /// NormalizeSurfaceと同じ判定）。障害等どちらにも当てはまらない場合はnull。
-        /// 仕様書§21「馬場変更が反映される」の検知（Validator、Issue #14）に使う。</summary>
+        /// 仕様書§21「馬場変更が反映される」の検知（Validator）に使う。</summary>
         private static string BabaConditionFor(string trackSurfaceCode, JV_RA_RACE ra)
         {
             if (string.IsNullOrEmpty(trackSurfaceCode)) return null;

@@ -8,15 +8,15 @@ namespace KeibaDataCollector.Services
     /// <summary>
     /// 仕様書§14 AI文章生成・検証、および§5 LicenseGateの公開経路への実接続。
     ///
-    /// ContentGeneratorService（Issue #5）が作った1件ずつのGeneratedPickを、公開する直前に
+    /// ContentGeneratorServiceが作った1件ずつのGeneratedPickを、公開する直前に
     /// この場所で最終チェックする。
     ///   1. DB照合: 生成時点で見ていた馬番・血統登録番号・馬名・AI指数・騎手・馬場状態が、
     ///      今のscoresテーブルの値と矛盾していないか（不一致があれば「生成後にレース情報が
     ///      変わった」ことを意味する）。
     ///   2. LicenseGate: この開催場が今Web公開してよい状態か（仕様書§5「取得できる」≠
     ///      「公開してよい」の実運用ゲート。ここが最終防衛線）。
-    /// どちらか一方でも不合格ならValidatorPassed=falseとし、呼び出し側（将来のPublisher、
-    /// Issue #7）はそれを見て公開を止める。
+    /// どちらか一方でも不合格ならValidatorPassed=falseとし、呼び出し側（Publisher）は
+    /// それを見て公開を止める。
     ///
     /// 判定結果は合否にかかわらずpredictionsテーブルへimmutableに保存する（不合格分も含めて
     /// 保存するのは、「なぜ公開されなかったか」を後から追跡できるようにするため。
@@ -81,7 +81,7 @@ namespace KeibaDataCollector.Services
 
         /// <summary>生成時点でGeneratedPickが参照していた値と、今のscoresテーブルの値を突き合わせる。
         /// 仕様書§14「生成後、馬名・馬番・指数・レース番号をDBと照合。不一致があれば公開停止」に対応
-        /// （馬名照合はIssue #13で追加。SEレコードのBameiをscores.horse_nameに保存している）。</summary>
+        /// （馬名照合はSEレコードのBameiをscores.horse_nameに保存したものを使う）。</summary>
         private bool CheckAgainstCurrentData(GeneratedPick pick, System.Collections.Generic.List<string> notes)
         {
             var current = _scores.GetRaceScores(pick.Race.RaceDate, pick.Race.TrackCode, pick.Race.RaceNumber)

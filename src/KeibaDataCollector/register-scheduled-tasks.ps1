@@ -19,12 +19,6 @@
 
     watch モードは当日の全レースが確定すると自身で終了するため、停止トリガーは不要です。
 
-    このスクリプトはIssue #2の移植時点ではMorning/Predict/Watchの3タスクしか登録していなかった
-    （移植元に元々あった`backfill incremental`すら未登録だった）。Issue #3〜#14で追加した
-    score/trend/content/verifyやIssue #9のdashboardは、対応する`scheduled-*.bat`は存在するのに
-    タスクスケジューラへの登録が無く、運用者が手動実行しない限り「全自動」になっていなかった
-    （仕様書全体の再チェックで発覚。Issue #15）。
-
     「前日夜: 翌日開催場・出走予定を準備」（仕様書§12）に対応する専用タスクは意図的に作っていない。
     出馬表は開催日より前に配信されるため（JV-Data仕様書）、`morning`は当日分を早朝に取得すれば
     間に合う設計のまま（既存のRaceDiscovery/RaceCardServiceが対象日を"ThisWeekAndToday"で
@@ -212,7 +206,7 @@ Register-KeibaTask -TaskName 'KeibaDataCollector-Predict' -BatPath $predictBat -
 Register-KeibaTask -TaskName 'KeibaDataCollector-Watch' -BatPath $watchBat -StartTime $WatchTime `
     -Description 'レース確定を監視し、結果・払戻をWordPressへ随時反映する。全レース確定で自動終了する'
 
-# --- ここから仕様書§12対応で追加したタスク（Issue #15） -----------------------
+# --- 仕様書§12対応のその他タスク ---------------------------------------------
 
 Register-KeibaTask -TaskName 'KeibaDataCollector-BackfillIncremental' -BatPath $backfillBat -StartTime $BackfillTime `
     -Description '深夜: 6ファクター/AI指数用の履歴データを差分取得する（option=Normal、ダイアログ無し）'
