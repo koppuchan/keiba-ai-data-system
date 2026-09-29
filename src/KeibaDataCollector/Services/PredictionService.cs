@@ -39,9 +39,6 @@ namespace KeibaDataCollector.Services
         private readonly IRaceDataSource _source;
         private readonly WordPressClient _wp;
 
-        // 速報オッズ（単複枠）。O1レコードに単勝オッズと単勝人気順が入る。
-        private const string RealtimeOddsDataSpec = "0B31";
-
         /// <summary>人気1位から順に割り当てる印。数を増やせば5番手以降にも付けられる。</summary>
         private static readonly string[] Marks = { "◎", "○", "▲", "△" };
 
@@ -209,41 +206,9 @@ namespace KeibaDataCollector.Services
         /// </summary>
         private int _lastOpenReturnCode;
 
-        private Dictionary<int, JvRecordParser.TanshoOdds> FetchTanshoOdds(RaceKey race)
-        {
-            Dictionary<int, JvRecordParser.TanshoOdds> byUmaban = null;
-
-            int rc = _source.OpenRealtime(RealtimeOddsDataSpec, race.AsJvRealtimeKey());
-            _lastOpenReturnCode = rc;
-            if (rc != 0)
-            {
-                // Openに対するCloseを必ず呼ぶ。呼ばずに抜けると以降のOpenが -202 で失敗し続ける。
-                _source.Close();
-                return null;
-            }
-
-            try
-            {
-                while (true)
-                {
-                    int size = _source.Read(out var buffer, out _);
-                    if (size == 0) break;
-                    if (size == -1) continue;
-                    if (size == -3) { Thread.Sleep(500); continue; }
-                    if (size < 0) break;
-
-                    if (JvRecordParser.GetRecordTypeId(buffer) != "O1") continue;
-
-                    var (_, parsed) = JvRecordParser.ParseTanshoOdds(buffer);
-                    if (parsed.Count > 0) byUmaban = parsed; // 後から届いたものほど新しい
-                }
-            }
-            finally
-            {
-                _source.Close();
-            }
-
-            return byUmaban;
-        }
+        /// <summary>取得処理自体はContentGeneratorService（仕様書§11）と共通のため
+        /// RealtimeOddsFetcherへ切り出し済み（Interop/RealtimeOddsFetcher.cs）。挙動は変更なし。</summary>
+        private Dictionary<int, JvRecordParser.TanshoOdds> FetchTanshoOdds(RaceKey race) =>
+            RealtimeOddsFetcher.FetchTansho(_source, race, out _lastOpenReturnCode);
     }
 }
