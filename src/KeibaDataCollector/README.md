@@ -7,21 +7,31 @@
 
 ```
 KeibaDataCollector.exe setup       # 初回のみ。利用キー等をGUIダイアログで登録
-KeibaDataCollector.exe morning     # 朝一: 当日の出走表取得→WordPress反映
-KeibaDataCollector.exe watch       # レース確定監視→結果・払戻を随時反映
-KeibaDataCollector.exe predict     # 朝一オッズの人気順から予想印を生成→反映
-KeibaDataCollector.exe score       # 6ファクター算出→WordPress(hrc_factors)へ反映
-KeibaDataCollector.exe backfill    # 6ファクター用の過去データ取得
+KeibaDataCollector.exe morning     # 朝一: 当日の出走表取得→WordPress反映（※既存システムと重複、下記参照）
+KeibaDataCollector.exe watch       # レース確定監視→結果・払戻を随時反映（※既存システムと重複、下記参照）
+KeibaDataCollector.exe predict     # 朝一オッズの人気順から予想印を生成→反映（※既存システムと重複、下記参照）
+KeibaDataCollector.exe score       # 6ファクター・AI指数を算出しscoresテーブルへ保存（WordPressへは送らない）
+KeibaDataCollector.exe backfill    # 6ファクター用の過去データ取得（ローカルSQLiteのみ、WordPressへは送らない）
 KeibaDataCollector.exe probe       # 調査用: どのデータ種別で何が取れるか確認（WordPressへ書き込まない）
 KeibaDataCollector.exe dbstats     # 蓄積済みSQLiteの件数・日付範囲を確認
-KeibaDataCollector.exe trend       # 本日の傾向（脚質・枠・馬場・上がり・通過順）を算出
-KeibaDataCollector.exe content     # 狙い馬・穴馬・危険な人気馬を生成・検証・公開
-KeibaDataCollector.exe verify      # predictionsを確定着順と突き合わせて検証
+KeibaDataCollector.exe trend       # 本日の傾向（脚質・枠・馬場・上がり・通過順）を算出（ローカルのみ）
+KeibaDataCollector.exe content     # 狙い馬・穴馬・危険な人気馬を生成・検証・公開（新規keiba_digest投稿へ）
+KeibaDataCollector.exe verify      # predictionsを確定着順と突き合わせて検証（ローカルのみ）
 KeibaDataCollector.exe stats       # 指数帯別の3着内率・勝率を表示
 KeibaDataCollector.exe licensegate # LicenseGateの確認・更新（下記）
 KeibaDataCollector.exe weights     # AI指数6ファクターの重み設定の確認・更新
 KeibaDataCollector.exe dashboard   # 監視ダッシュボード（仕様書§17）をコンソール表示・WordPress送信
 ```
+
+**本番運用で実際にスケジュール登録するのは `backfill incremental` / `score` / `trend` / `content` /
+`verify` / `dashboard` のみ。** `morning` / `predict` / `watch` は既存システム
+（`keiba-race-result-auto-posting` / `horse-race-custom-builder`）側の同名バッチが既に同じWordPress
+投稿（`race`カスタム投稿タイプ）へ出走表・予想印・結果を反映しており、仕様書§2が求めているのは
+既存の予想ページへの「連携」であって二重公開ではない。この新システムのTrend/Content/Verifyは
+いずれもJV-Link/UmaConnから当日データを直接読み直す設計のため、`morning`/`predict`/`watch`が
+このアプリ側で実行されている必要も無い。`morning`/`predict`/`watch`コマンド自体は残しているが
+（既存システムを将来的にこちらへ統合する場合のため）、既存システムと同居させる運用では
+Task Schedulerに登録しないこと（`register-scheduled-tasks.ps1`もこの3つは登録しない）。
 
 運用（`deploy.ps1`によるビルド→再起動手順等）は既存2リポジトリと同じ運用スクリプトをそのまま
 同梱している。詳細な注意点（JV-Link Setup取得は無人実行不可、ダイアログ対策、ページキャッシュ、
