@@ -5,7 +5,7 @@ REM Task Scheduler entry point for the Trend Engine batch (spec section 10).
 REM
 REM %1 is required: morning | live | final. Register three separate scheduled
 REM tasks pointing at this same script with different %1 values:
-REM   - morning: once, early (e.g. 07:30, right after KeibaDataCollector-Morning)
+REM   - morning: once, early (e.g. 07:30, right after KeibaAiDataSystem-Morning)
 REM   - live:    every 30-60 min through the racing day
 REM   - final:   once, after the last race of the day is expected to finish
 REM

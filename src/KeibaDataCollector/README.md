@@ -30,8 +30,10 @@ KeibaDataCollector.exe dashboard   # 監視ダッシュボード（仕様書§17
 ## VPSへの初回デプロイ手順
 
 既存2システム（`keiba-race-result-auto-posting` / `horse-race-custom-builder`）と同じWindows VPS
-常駐アプリとしての運用を前提にしている。同じVPSに同居させる場合でも、タスク名（`KeibaDataCollector-*`）・
-インストール先ディレクトリとも既存2システムとは別なので、名前が衝突することはない。
+常駐アプリとしての運用を前提にしている。既存2システムは実行ファイル名・タスク名とも
+`KeibaDataCollector-*` の慣習を使っているため、本システムのタスクは既定で別名前空間
+`KeibaAiDataSystem-*`（詳細は後述のTask Scheduler登録の節）を使い、衝突しないようにしている。
+インストール先ディレクトリも既存2システムとは別にすること。
 
 1. **前提ソフトウェアの導入**（VPS側で1回のみ）
    - .NET SDK（`dotnet build`用。net48ターゲットのビルドにはWindows上の .NET SDK が必要）
@@ -83,26 +85,37 @@ KeibaDataCollector.exe dashboard   # 監視ダッシュボード（仕様書§17
 
 `register-scheduled-tasks.ps1` が、仕様書§12の自動更新スケジュール表に沿って以下をすべて登録する。
 
+**タスク名は既定で `KeibaAiDataSystem-*`。** 同じVPS上に既存2システム
+（`keiba-race-result-auto-posting` / `horse-race-custom-builder`）が稼働している場合、
+それらは同じ実行ファイル名・タスク名の慣習（`KeibaDataCollector-*`）を使っているため、
+名前空間を分けている。このスクリプトは既存タスクと同名のタスクを見つけると上書き登録する
+仕様なので、もし万一タスク名が重複すると既存システムの定義が書き換えられてしまう。
+既定のプレフィックスのまま使い、変更する場合は既存タスク名と重複しない値にすること。
+
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\register-scheduled-tasks.ps1
 ```
 
 | タスク | 既定時刻 | 内容 |
 | --- | --- | --- |
-| `KeibaDataCollector-BackfillIncremental` | 02:00（1回） | 深夜: 履歴データの差分取得 |
-| `KeibaDataCollector-Morning` | 07:00（1回） | 早朝: 当日の出走表取得 |
-| `KeibaDataCollector-Score` | 07:30〜（20分毎/14時間） | 朝〜発走前〜レース間: AI指数算出 |
-| `KeibaDataCollector-TrendMorning` | 07:45（1回） | 朝: 事前想定傾向 |
-| `KeibaDataCollector-Content` | 07:40〜（20分毎/14時間） | 発走前〜レース間: 狙い馬・穴馬・危険な人気馬の生成・検証・公開（Scoreの後に走るようずらしてある） |
-| `KeibaDataCollector-Predict` | 09:00〜（15分毎/12時間） | 予想印の生成 |
-| `KeibaDataCollector-TrendLive` | 09:00〜（30分毎/12時間） | 開催中: 現時点の傾向 |
-| `KeibaDataCollector-Watch` | 09:30（1回、全確定で自動終了） | レース間: 結果・払戻監視 |
-| `KeibaDataCollector-Dashboard` | 07:00〜（30分毎/15時間） | 日中: 監視ダッシュボードのWordPress送信 |
-| `KeibaDataCollector-TrendFinal` | 21:30（1回） | 開催終了後: 本日の結果分析 |
-| `KeibaDataCollector-Verify` | 22:00（1回） | 開催終了後: レース後検証 |
+| `KeibaAiDataSystem-BackfillIncremental` | 02:00（1回） | 深夜: 履歴データの差分取得 |
+| `KeibaAiDataSystem-Morning` | 07:00（1回） | 早朝: 当日の出走表取得 |
+| `KeibaAiDataSystem-Score` | 07:30〜（20分毎/14時間） | 朝〜発走前〜レース間: AI指数算出 |
+| `KeibaAiDataSystem-TrendMorning` | 07:45（1回） | 朝: 事前想定傾向 |
+| `KeibaAiDataSystem-Content` | 07:40〜（20分毎/14時間） | 発走前〜レース間: 狙い馬・穴馬・危険な人気馬の生成・検証・公開（Scoreの後に走るようずらしてある） |
+| `KeibaAiDataSystem-Predict` | 09:00〜（15分毎/12時間） | 予想印の生成 |
+| `KeibaAiDataSystem-TrendLive` | 09:00〜（30分毎/12時間） | 開催中: 現時点の傾向 |
+| `KeibaAiDataSystem-Watch` | 09:30（1回、全確定で自動終了） | レース間: 結果・払戻監視 |
+| `KeibaAiDataSystem-Dashboard` | 07:00〜（30分毎/15時間） | 日中: 監視ダッシュボードのWordPress送信 |
+| `KeibaAiDataSystem-TrendFinal` | 21:30（1回） | 開催終了後: 本日の結果分析 |
+| `KeibaAiDataSystem-Verify` | 22:00（1回） | 開催終了後: レース後検証 |
 
 「前日夜: 翌日開催場・出走予定を準備」（仕様書§12）に対応する専用タスクは意図的に作っていない
 （`morning`は当日分を早朝に取得すれば間に合う設計のため。詳細はスクリプト冒頭のコメント参照）。
+
+既存システムの `KeibaDataCollector-Watch` 等が既に稼働中の場合、実行タイミングが重なると
+JV-Link/UmaConnへの同時接続で競合する可能性がある。本システムの既定時刻（Watch=09:30〜等）と
+既存システム側の登録時刻を見比べ、必要なら `-WatchTime` 等の引数でずらすこと。
 
 ## LicenseGate（仕様書§5）
 
