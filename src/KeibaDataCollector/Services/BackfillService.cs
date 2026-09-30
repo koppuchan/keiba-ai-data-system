@@ -101,7 +101,7 @@ namespace KeibaDataCollector.Services
 
             // レースキー(日付+場コード+R番号)ごとの距離・トラック種別・最も早いコーナー/最終コーナーの
             // 通過順位（先頭からの馬番配列）。前者は②テン速度・展開用、後者はTrend Engine（仕様書§10）
-            // の通過順傾向用（Issue #12）。RA到着時に埋め、SE処理時に参照する。
+            // の通過順傾向用。RA到着時に埋め、SE処理時に参照する。
             var raceInfoByKey = new Dictionary<string, (int Distance, string TrackSurfaceCode, int[] EarliestCornerOrder, int[] LatestCornerOrder)>();
 
             // HR（払戻）はここに溜めるだけにして、ストリーム読み込みが全部終わった後にまとめて
@@ -464,7 +464,7 @@ namespace KeibaDataCollector.Services
         }
 
         /// <summary>最終コーナーの通過順位配列で、この馬番が先頭（配列の0番目）だったか。
-        /// TrendEngineService.ComputeTodayPassageと同じ定義（Issue #4・#12）。配列が空・馬番が
+        /// TrendEngineService.ComputeTodayPassageと同じ定義。配列が空・馬番が
         /// 見つからない場合はnull（「先頭でなかった」ではなく「分からない」として区別する）。</summary>
         private static bool? ComputeIsFinalCornerLeader(int[] latestCornerOrder, int umaban)
         {

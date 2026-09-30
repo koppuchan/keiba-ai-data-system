@@ -6,7 +6,7 @@ using KeibaDataCollector.Models;
 namespace KeibaDataCollector.Data
 {
     /// <summary>
-    /// 仕様書§18 レース後の自動検証。predictions（Issue #6・#7でimmutableに保存済み）1件ごとに、
+    /// 仕様書§18 レース後の自動検証。predictions（immutableに保存済み）1件ごとに、
     /// 確定着順と突き合わせた結果を保持する。
     ///
     /// upsertを許しているのは「同じpredictionに対する検証を後から書き換える」ためではなく、

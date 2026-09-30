@@ -98,7 +98,7 @@ namespace KeibaDataCollector.Data
         }
 
         /// <summary>Trend Engine（仕様書§10）の朝段階・通過順傾向用。RAレコードの最終コーナー
-        /// 通過順位から「この馬がその時点で先頭だったか」を保持する列を追加する（Issue #12）。
+        /// 通過順位から「この馬がその時点で先頭だったか」を保持する列を追加する。
         /// BackfillServiceが早期通過順位(early_position_ratio)を算出しているのと同じ材料
         /// （JvFactorRecordParser.ParseLatestCornerOrder）から求める。旧DBの既存行はNULLのままなので、
         /// 過去分を朝段階の集計対象にするには再度run-backfill.batが必要。</summary>

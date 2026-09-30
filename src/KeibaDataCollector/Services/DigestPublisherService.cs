@@ -15,8 +15,8 @@ namespace KeibaDataCollector.Services
     /// 公開直前のゲートをここに集約する:
     ///   1. LicenseGate（仕様書§5・§21「契約範囲外の競馬場を誤って公開しない」）
     ///   2. 自動公開ON/OFF（仕様書§13。WordPress管理画面のチェックボックスと連動）
-    ///   3. Validator未通過のピックを含めない（Validator自体はIssue #6で実装済み。
-    ///      ここでは「合格したものだけを渡す」という契約を呼び出し側に課す）
+    ///   3. Validator未通過のピックを含めない（ここでは「合格したものだけを渡す」
+    ///      という契約を呼び出し側に課す）
     ///   4. 空コンテンツなら送信しない（DigestPayload.HasAnyContent）
     /// </summary>
     public class DigestPublisherService
@@ -67,12 +67,11 @@ namespace KeibaDataCollector.Services
             if (!payload.HasAnyContent)
                 return PublishOutcome.Skipped("公開対象のコンテンツが1件もありません（AI指数TOP5・傾向・ピックすべて空）。");
 
-            // AI指数TOP5も仕様書§18のレース後自動検証（Issue #8）の対象にするため、公開するものは
-            // predictionsへimmutableにsnapshotしておく。狙い馬/穴馬/危険な人気馬はIssue #6の
-            // ValidatorService.ValidateAndSnapshotで既にsnapshot済みだが、AI指数TOP5にはこれまで
-            // snapshotの機会が無かった（Validatorを経由しない。TOP5は「生成→後で再照合」ではなく
-            // 「今のDBの値をそのまま出す」ものなので、Validator相当のDB再照合は不要と判断し、
-            // ここで直接snapshotする）。
+            // AI指数TOP5も仕様書§18のレース後自動検証の対象にするため、公開するものは
+            // predictionsへimmutableにsnapshotしておく。狙い馬/穴馬/危険な人気馬は
+            // ValidatorService.ValidateAndSnapshotで既にsnapshot済みだが、AI指数TOP5は
+            // Validatorを経由しない（「生成→後で再照合」ではなく「今のDBの値をそのまま出す」
+            // ものなので、Validator相当のDB再照合は不要と判断し、ここで直接snapshotする）。
             if (top5 != null)
             {
                 foreach (var t in top5)

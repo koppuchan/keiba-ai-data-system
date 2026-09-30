@@ -17,7 +17,7 @@ namespace KeibaDataCollector.Services
     public class AiIndexService
     {
         /// <summary>採点ロジック（加重平均の式、ファクター数等）を変えたら上げる。
-        /// Verification DB（Issue #8）で指数帯別成績をこの値ごとに分離するための識別子。</summary>
+        /// Verification DBで指数帯別成績をこの値ごとに分離するための識別子。</summary>
         public const string ModelVersion = "ai-index-v1";
 
         /// <summary>特徴量抽出ロジック（FactorScoringServiceの各Compute*メソッド）を変えたら上げる。
