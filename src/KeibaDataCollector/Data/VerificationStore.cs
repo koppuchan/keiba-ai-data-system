@@ -21,12 +21,7 @@ namespace KeibaDataCollector.Data
 
         public VerificationStore(string dbPath)
         {
-            var dir = System.IO.Path.GetDirectoryName(dbPath);
-            if (!string.IsNullOrEmpty(dir) && !System.IO.Directory.Exists(dir))
-                System.IO.Directory.CreateDirectory(dir);
-
-            _conn = new SQLiteConnection($"Data Source={dbPath};Version=3;");
-            _conn.Open();
+            _conn = SqliteConnections.Open(dbPath);
             _ownsConnection = true;
             EnsureSchema();
         }

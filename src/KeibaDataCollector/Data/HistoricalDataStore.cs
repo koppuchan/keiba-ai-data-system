@@ -30,13 +30,8 @@ namespace KeibaDataCollector.Data
 
         public HistoricalDataStore(string dbPath)
         {
-            var dir = Path.GetDirectoryName(dbPath);
-            if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
-                Directory.CreateDirectory(dir);
-
             var isNew = !File.Exists(dbPath);
-            _conn = new SQLiteConnection($"Data Source={dbPath};Version=3;");
-            _conn.Open();
+            _conn = SqliteConnections.Open(dbPath);
 
             if (isNew)
                 Console.WriteLine($"[HistoricalDataStore] 新規DBを作成: {dbPath}");
