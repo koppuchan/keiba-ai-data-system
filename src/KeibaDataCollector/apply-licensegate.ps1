@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     承認済みの公開許諾（JRA・地方競馬の各開催場）をLicenseGateへ反映する。
 
