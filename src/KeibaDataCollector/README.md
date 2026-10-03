@@ -78,7 +78,12 @@ Task Schedulerに登録しないこと（`register-scheduled-tasks.ps1`もこの
 
 6. **LicenseGateの状態確認**: JRA-VAN・競馬最強の法則WEB双方からの公開・商用利用許諾が
    確認できるまで、WordPressへの自動公開は設計上ブロックされる。許諾確認が取れ次第、
-   `licensegate set-jra` / `licensegate set-local` で状態を更新する（詳細は後述）。
+   `apply-licensegate.ps1` で承認済みの開催場を反映する（状態はSQLiteに永続化されるため、
+   実行は初回と承認範囲が変わったときのみ。`deploy.ps1`には意図的に含めていない）。
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File .\apply-licensegate.ps1 -Note "2026-10-01 クライアントより許諾承認確認"
+   ```
+   個別の確認・更新は `licensegate show / set-jra / set-local`（詳細は後述）でも行える。
 
 7. **Task Schedulerへの登録**（本README「Windows Task Scheduler登録」参照）
    ```powershell
