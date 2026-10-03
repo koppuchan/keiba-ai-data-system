@@ -36,7 +36,7 @@ $ErrorActionPreference = 'Stop'
 $JraApproved = $true
 
 # 地方競馬: 開催場ID => 表示名（表示用のラベルで、判定にはIDだけが使われる）。
-# ばんえい（帯広）は平地競馬と同じ指標では扱えない（仕様書§2）ため含めていない。
+# 83はばんえい（帯広）。専用の指標は未実装で、AI指数は開催場単位の重みへフォールバックする。
 $LocalVenues = [ordered]@{
     '30' = '門別'
     '35' = '盛岡'
@@ -52,6 +52,7 @@ $LocalVenues = [ordered]@{
     '51' = '姫路'
     '54' = '高知'
     '55' = '佐賀'
+    '83' = '帯広（ばんえい）'
 }
 
 $exe = Join-Path $PSScriptRoot 'bin\Debug\net48\KeibaDataCollector.exe'
