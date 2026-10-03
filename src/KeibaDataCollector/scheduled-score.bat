@@ -3,8 +3,11 @@ chcp 65001 >nul
 REM ============================================================================
 REM Task Scheduler entry point for the 6-factor scoring batch.
 REM
-REM Computes the 6 factors for today's runners from the backfilled local SQLite
-REM (data\historical.sqlite3) and pushes them to WordPress as hrc_factors.
+REM Computes the 6 factors + AI index for today's runners from the backfilled
+REM local SQLite (data\historical.sqlite3) and saves them to the scores table.
+REM Does NOT push to WordPress (hrc_factors) - the existing horse-race-custom-builder
+REM deployment already does that for the same posts; this app's content command
+REM publishes the new AI index / trend / picks to a separate WordPress post type.
 REM Meant to run several times a day (e.g. every 3 hours) so that whichever run
 REM lands after that day's race cards are posted picks them up within a few
 REM hours - a run that finds no races yet simply does nothing and exits 0.

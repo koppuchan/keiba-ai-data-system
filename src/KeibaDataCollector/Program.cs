@@ -187,7 +187,10 @@ namespace KeibaDataCollector
 
                     case "score":
                     {
-                        // 当日出走馬の6ファクターを算出しWordPress(hrc_factors)へ反映する。
+                        // 当日出走馬の6ファクター・AI指数を算出しscoresテーブルへ保存する。
+                        // WordPressへは送らない（既存システムが同じ投稿へ既にhrc_factorsを
+                        // 送信しているため、二重公開を避けている。contentコマンドが公開する
+                        // 新規のkeiba_digest投稿がこのscoresテーブルを参照する）。
                         // ローカルSQLite（backfill済みの履歴）を読むだけで、JV-Link/UmaConnからは
                         // 当日の出走表（KettoNum突き合わせ用）のみ取得する。
                         var targetDate = DateTime.Today;
@@ -204,17 +207,12 @@ namespace KeibaDataCollector
                         if (targetDate != DateTime.Today)
                             Console.WriteLine($"対象日: {targetDate:yyyy-MM-dd}（引数指定）");
 
-                        var wp = new WordPressClient(
-                            AppConfig.WordPressBaseUrl,
-                            AppConfig.WordPressUser,
-                            AppConfig.WordPressAppPassword);
-
                         using (var store = new HistoricalDataStore(AppConfig.HistoricalDbPath))
                         using (var scoresStore = new ScoresStore(store.Connection))
                         {
                             var scoring = new FactorScoringService(store);
-                            RunScoreFor(jvLink, wp, scoring, scoresStore, targetDate);
-                            RunScoreFor(umaConn, wp, scoring, scoresStore, targetDate);
+                            RunScoreFor(jvLink, scoring, scoresStore, targetDate);
+                            RunScoreFor(umaConn, scoring, scoresStore, targetDate);
                         }
                         break;
                     }
@@ -361,7 +359,9 @@ namespace KeibaDataCollector
             Console.WriteLine("  setup       : 初回のみ。利用キー等をGUIダイアログで設定する。");
             Console.WriteLine("  morning     : 朝一バッチ。当日の出走表を取得しWordPressへ反映する。");
             Console.WriteLine("  predict     : 朝一オッズの人気順から予想印を生成しWordPressへ反映する。");
-            Console.WriteLine("  score       : 当日出走馬の6ファクターを算出しWordPress(hrc_factors)へ反映する。");
+            Console.WriteLine("  score       : 当日出走馬の6ファクター・AI指数を算出しscoresテーブルへ保存する");
+            Console.WriteLine("              （WordPressへは送らない。既存システムが同じ投稿へ既にhrc_factorsを");
+            Console.WriteLine("              送信しているため）。contentコマンドがこのscoresテーブルを公開する。");
             Console.WriteLine("              事前にbackfillで履歴を蓄積しておく必要がある。");
             Console.WriteLine("              引数省略時は今日。yyyy-MM-dd形式の日付を渡すとその日を対象にする。");
             Console.WriteLine("  watch       : レース確定を監視し、結果・払戻を随時WordPressへ反映する。");
@@ -534,12 +534,12 @@ namespace KeibaDataCollector
             }
         }
 
-        private static void RunScoreFor(JvSpecComDataSource source, WordPressClient wp, FactorScoringService scoring, ScoresStore scoresStore, DateTime targetDate)
+        private static void RunScoreFor(JvSpecComDataSource source, FactorScoringService scoring, ScoresStore scoresStore, DateTime targetDate)
         {
             try
             {
                 source.Initialize(AppConfig.JvLinkSoftwareId);
-                new FactorPublishService(source, wp, scoring, scoresStore).RunForToday(targetDate);
+                new FactorPublishService(source, scoring, scoresStore).RunForToday(targetDate);
                 LogSuccess(source.SourceName, "AI指数算出", "正常終了");
             }
             catch (Exception ex)

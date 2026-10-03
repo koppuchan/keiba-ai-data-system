@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Data.SQLite;
-using System.IO;
 using KeibaDataCollector.Models;
 
 namespace KeibaDataCollector.Data
@@ -27,12 +26,7 @@ namespace KeibaDataCollector.Data
 
         public LicenseGateStore(string dbPath)
         {
-            var dir = Path.GetDirectoryName(dbPath);
-            if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
-                Directory.CreateDirectory(dir);
-
-            _conn = new SQLiteConnection($"Data Source={dbPath};Version=3;");
-            _conn.Open();
+            _conn = SqliteConnections.Open(dbPath);
             _ownsConnection = true;
 
             EnsureSchema();

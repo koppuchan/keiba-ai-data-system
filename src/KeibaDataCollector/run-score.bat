@@ -1,7 +1,10 @@
 @echo off
 chcp 65001 >nul
-REM Computes the 6 factors for today's runners from the backfilled local SQLite
-REM (data\historical.sqlite3) and pushes them to WordPress as hrc_factors.
+REM Computes the 6 factors + AI index for today's runners from the backfilled
+REM local SQLite (data\historical.sqlite3) and saves them to the scores table.
+REM Does NOT push to WordPress (hrc_factors) - the existing horse-race-custom-builder
+REM deployment already does that for the same posts; this app's content command
+REM publishes the new AI index / trend / picks to a separate WordPress post type.
 REM Run run-backfill.bat at least once before this, or every horse will score null.
 
 cd /d "%~dp0"

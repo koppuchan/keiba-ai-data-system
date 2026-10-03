@@ -3,20 +3,25 @@
     KeibaDataCollector の朝一バッチ／確定監視をタスクスケジューラへ登録する。
 
 .DESCRIPTION
-    仕様書§12「自動更新スケジュール」に対応する全タスクを作成します。タスク名は既定で
+    仕様書§12「自動更新スケジュール」に対応するタスクを作成します。タスク名は既定で
     "KeibaAiDataSystem-*"（-TaskPrefixで変更可）。
 
-      KeibaAiDataSystem-Morning              : 毎日 -MorningTime              に scheduled-morning.bat（早朝）
       KeibaAiDataSystem-BackfillIncremental   : 毎日 -BackfillTime             に scheduled-backfill.bat incremental（深夜）
       KeibaAiDataSystem-Score                 : 毎日 -ScoreTime               から繰り返し scheduled-score.bat（朝〜発走前〜レース間）
       KeibaAiDataSystem-TrendMorning          : 毎日 -TrendMorningTime        に scheduled-trend.bat morning（朝）
       KeibaAiDataSystem-TrendLive             : 毎日 -TrendLiveTime           から繰り返し scheduled-trend.bat live（開催中）
       KeibaAiDataSystem-Content                : 毎日 -ContentTime            から繰り返し scheduled-content.bat（発走前〜レース間）
-      KeibaAiDataSystem-Predict               : 毎日 -PredictTime             から繰り返し scheduled-predict.bat
-      KeibaAiDataSystem-Watch                 : 毎日 -WatchTime               に scheduled-watch.bat（レース間）
       KeibaAiDataSystem-TrendFinal            : 毎日 -TrendFinalTime          に scheduled-trend.bat final（開催終了後）
       KeibaAiDataSystem-Verify                : 毎日 -VerifyTime              に scheduled-verify.bat（開催終了後）
       KeibaAiDataSystem-Dashboard             : 毎日 -DashboardTime           から繰り返し scheduled-dashboard.bat（日中）
+
+    意図的にmorning/predict/watchは登録しません。既存システム（`keiba-race-result-auto-posting` /
+    `horse-race-custom-builder`）が同じWordPress投稿（`race`カスタム投稿タイプ）へ既に出走表・
+    予想印・結果を反映しており、仕様書§2が求めているのは既存の予想ページへの「連携」であって
+    二重公開ではないため。scoreコマンドもWordPressのhrc_factorsへは送らずscoresテーブルへの
+    保存のみ行う（同じ理由）。既存システムと同居させない・将来的に統合するなどの理由でこれらも
+    登録したい場合は、KeibaDataCollector.exe morning/predict/watchを個別にRegister-ScheduledTask
+    すること（本スクリプトはあえて対応していない）。
 
     watch モードは当日の全レースが確定すると自身で終了するため、停止トリガーは不要です。
 
@@ -40,17 +45,6 @@
       実行される必要があります。既定では、このスクリプトを実行している
       ユーザー自身が登録されます。
 
-.PARAMETER MorningTime
-    朝一バッチの実行時刻（HH:mm）。既定 07:00。
-    出馬表は開催日より前に配信されるため、早朝で問題ありません。
-
-.PARAMETER PredictTime
-    予想印を生成する時刻。出走表が揃い、オッズが動き始めたあとに実行する。
-
-.PARAMETER WatchTime
-    確定監視の開始時刻（HH:mm）。既定 09:30。
-    地方競馬のナイター開催まで監視が続くよう、余裕をもって早めに開始します。
-
 .PARAMETER RunOnlyWhenLoggedOn
     指定すると「ログオン時のみ実行」で登録します（既定）。
     JV-Link / UmaConn はダイアログを出すことがあり、非対話セッションだと
@@ -64,20 +58,17 @@
     変更する場合も既存タスク名と重複しない値にすること。
 
 .EXAMPLE
-    # 既定（07:00 朝一 / 09:30 監視開始、ログオン時のみ実行）
+    # 既定（ログオン時のみ実行）
     powershell -ExecutionPolicy Bypass -File .\register-scheduled-tasks.ps1
 
 .EXAMPLE
     # 時刻を変える
-    powershell -ExecutionPolicy Bypass -File .\register-scheduled-tasks.ps1 -MorningTime 06:30 -WatchTime 10:00
+    powershell -ExecutionPolicy Bypass -File .\register-scheduled-tasks.ps1 -ScoreTime 07:15 -VerifyTime 22:30
 #>
 [CmdletBinding()]
 param(
     [string] $TaskPrefix = 'KeibaAiDataSystem',
-    [string] $MorningTime = '07:00',
-    [string] $PredictTime = '09:00',
-    [string] $WatchTime = '09:30',
-    # 以下、仕様書§12対応で追加したタスクの時刻。深夜→早朝→朝→発走前/レース間→開催終了後、の順。
+    # 以下、仕様書§12対応のタスクの時刻。深夜→朝→発走前/レース間→開催終了後、の順。
     [string] $BackfillTime = '02:00',
     [string] $ScoreTime = '07:30',
     [string] $TrendMorningTime = '07:45',
@@ -95,9 +86,6 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 # 登録し直したことで停止したタスクを、あとでまとめて再開するために覚えておく。
 $script:TasksToResume = @()
 
-$morningBat = Join-Path $scriptDir 'scheduled-morning.bat'
-$predictBat = Join-Path $scriptDir 'scheduled-predict.bat'
-$watchBat = Join-Path $scriptDir 'scheduled-watch.bat'
 $backfillBat = Join-Path $scriptDir 'scheduled-backfill.bat'
 $scoreBat = Join-Path $scriptDir 'scheduled-score.bat'
 $trendBat = Join-Path $scriptDir 'scheduled-trend.bat'
@@ -108,7 +96,7 @@ $exePath = Join-Path $scriptDir 'bin\Debug\net48\KeibaDataCollector.exe'
 $secrets = Join-Path $scriptDir 'secrets.local.bat'
 
 # --- 事前チェック ------------------------------------------------------------
-foreach ($required in @($morningBat, $predictBat, $watchBat, $backfillBat, $scoreBat, $trendBat, $contentBat, $verifyBat, $dashboardBat, $exePath)) {
+foreach ($required in @($backfillBat, $scoreBat, $trendBat, $contentBat, $verifyBat, $dashboardBat, $exePath)) {
     if (-not (Test-Path $required)) {
         throw "必要なファイルが見つかりません: $required`nビルド済みか確認してください（dotnet build -c Debug）。"
     }
@@ -211,23 +199,11 @@ function Register-KeibaTask {
     Write-Output "登録しました: $TaskName ($StartTime 毎日)"
 }
 
-Register-KeibaTask -TaskName "$TaskPrefix-Morning" -BatPath $morningBat -StartTime $MorningTime `
-    -Description '当日の出走表を取得しWordPressへ反映する（朝一バッチ）'
-
-Register-KeibaTask -TaskName "$TaskPrefix-Predict" -BatPath $predictBat -StartTime $PredictTime `
-    -Description '朝一オッズの人気順から予想印を生成しWordPressへ反映する（オッズ配信を待って繰り返す）' `
-    -RepeatEvery (New-TimeSpan -Minutes 15) -RepeatFor (New-TimeSpan -Hours 12)
-
-Register-KeibaTask -TaskName "$TaskPrefix-Watch" -BatPath $watchBat -StartTime $WatchTime `
-    -Description 'レース確定を監視し、結果・払戻をWordPressへ随時反映する。全レース確定で自動終了する'
-
-# --- 仕様書§12対応のその他タスク ---------------------------------------------
-
 Register-KeibaTask -TaskName "$TaskPrefix-BackfillIncremental" -BatPath $backfillBat -StartTime $BackfillTime `
     -Description '深夜: 6ファクター/AI指数用の履歴データを差分取得する（option=Normal、ダイアログ無し）'
 
 Register-KeibaTask -TaskName "$TaskPrefix-Score" -BatPath $scoreBat -StartTime $ScoreTime `
-    -Description '朝〜発走前〜レース間: 当日出走馬のAI指数を算出しscoresテーブル・hrc_factorsへ反映する（繰り返し。取消・騎手変更・馬場変更の再計算もこの再実行で反映される）' `
+    -Description '朝〜発走前〜レース間: 当日出走馬のAI指数を算出しscoresテーブルへ保存する（WordPressへは送らない。繰り返し。取消・騎手変更・馬場変更の再計算もこの再実行で反映される）' `
     -RepeatEvery (New-TimeSpan -Minutes 20) -RepeatFor (New-TimeSpan -Hours 14)
 
 Register-KeibaTask -TaskName "$TaskPrefix-TrendMorning" -BatPath $trendBat -StartTime $TrendMorningTime `
@@ -267,7 +243,7 @@ if ($script:TasksToResume.Count -gt 0) {
 Write-Output ""
 Write-Output "完了しました。確認方法:"
 Write-Output "  Get-ScheduledTask -TaskName '$TaskPrefix-*' | Format-Table TaskName,State"
-Write-Output "  Start-ScheduledTask -TaskName '$TaskPrefix-Morning'   # 手動で試運転"
-Write-Output "  Get-ScheduledTaskInfo -TaskName '$TaskPrefix-Morning' # 前回結果を確認"
+Write-Output "  Start-ScheduledTask -TaskName '$TaskPrefix-Score'   # 手動で試運転"
+Write-Output "  Get-ScheduledTaskInfo -TaskName '$TaskPrefix-Score' # 前回結果を確認"
 Write-Output ""
 Write-Output "ログは $scriptDir\logs\ に日付ごとに出力されます。"

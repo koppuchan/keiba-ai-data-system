@@ -4,28 +4,31 @@ using System.Linq;
 using KeibaDataCollector.Data;
 using KeibaDataCollector.Interop;
 using KeibaDataCollector.Models;
-using KeibaDataCollector.WordPress;
 using static KeibaDataCollector.Interop.JvDataSdk.JVData_Struct;
 
 namespace KeibaDataCollector.Services
 {
     /// <summary>
-    /// 当日の出走馬について6ファクター＋統合AI指数（仕様書§8・§9）を算出し、
-    /// WordPressのhrc_factorsへ送信するとともに、AI指数はscoresテーブルへ永続化する。
+    /// 当日の出走馬について6ファクター＋統合AI指数（仕様書§8・§9）を算出し、scoresテーブルへ
+    /// 永続化する。ここではWordPressのhrc_factorsへは送信しない — 既存システム
+    /// （horse-race-custom-builder）側の同名バッチが既にそれを行っており、この新システムが
+    /// 同じ投稿へ二重に書き込むと、双方のAI指数エンジンの重み設定がSQLiteごとに独立している
+    /// ため計算結果が食い違い、公開値がどちらの実行が最後だったかで揺れる事態になりうる
+    /// （仕様書§2「既存サイトの予想ページ...へ連携」＝連携であって二重公開ではない、という
+    /// 読み方に基づく）。ここで算出したAI指数は`scores`テーブルに保存され、Content Generator
+    /// （contentコマンド）が新規の`keiba_digest`投稿へ公開する際に使われる。
     ///
-    /// WordPress側の race_card（RaceCardService経由で既に送信済み）には血統登録番号(KettoNum)が
-    /// 含まれていない（表示に不要なため元々持たせていない）。そのため、ここではWordPress経由ではなく
-    /// RaceCardServiceと同じ"RACE"データ種別を当日分だけ直接開き、SEレコードからKettoNumを
-    /// 取り出してHistoricalDataStoreと突き合わせる。
+    /// WordPress側の race_card（既存システムのRaceCardService経由で送信済み）には血統登録番号
+    /// (KettoNum)が含まれていない（表示に不要なため元々持たせていない）。そのため、ここでは
+    /// WordPress経由ではなく既存システムと同じ"RACE"データ種別を当日分だけ直接開き、SEレコード
+    /// からKettoNumを取り出してHistoricalDataStoreと突き合わせる。
     ///
     /// FactorScoringServiceが返すスコアはローカルSQLiteの蓄積状況に依存する。血統(⑤)がまだ
-    /// 0件（BLOD取得の問題が未解決）の間は、⑤は全馬nullのまま送信される
-    /// （nullのフィールドはJSON自体に含めない。WordPress側は欠けたキーとして扱える）。
+    /// 0件（BLOD取得の問題が未解決）の間は、⑤は全馬nullのまま保存される。
     /// </summary>
     public class FactorPublishService
     {
         private readonly IRaceDataSource _source;
-        private readonly WordPressClient _wp;
         private readonly AiIndexService _aiIndex;
         private readonly ScoresStore _scoresStore;
 
@@ -37,10 +40,9 @@ namespace KeibaDataCollector.Services
         /// 既存の公開プロパティ（SourceName）から導出する非侵襲的な方法を選んだ。</summary>
         private bool IsCentral => _source.SourceName.Contains("中央");
 
-        public FactorPublishService(IRaceDataSource source, WordPressClient wp, FactorScoringService scoring, ScoresStore scoresStore)
+        public FactorPublishService(IRaceDataSource source, FactorScoringService scoring, ScoresStore scoresStore)
         {
             _source = source;
-            _wp = wp;
             _scoresStore = scoresStore;
             _aiIndex = new AiIndexService(scoring, scoresStore);
         }
@@ -136,7 +138,7 @@ namespace KeibaDataCollector.Services
                 _source.Close();
             }
 
-            int published = 0, skipped = 0, failed = 0;
+            int computed = 0, failed = 0;
             foreach (var slug in entriesByRace.Keys)
             {
                 var raceKey = raceKeys[slug];
@@ -153,9 +155,6 @@ namespace KeibaDataCollector.Services
                 {
                     foreach (var (umaban, input) in entriesByRace[slug])
                     {
-                        // AiIndexServiceが内部でFactorScoringService.Computeを1回だけ呼び、
-                        // 6ファクター（hrc_factors送信用）とAI指数（scores永続化用）の両方を
-                        // 同じ計算結果から作る（二重計算を避ける）。
                         var result = _aiIndex.ComputeAndPersist(
                             input, targetDate, raceKey.RaceNumber, umaban, IsCentral, dataCutoffUtc);
                         scores[umaban] = result.Factors;
@@ -169,56 +168,23 @@ namespace KeibaDataCollector.Services
                     continue;
                 }
 
-                // 1レースの送信失敗で、残りのレースまで巻き添えにしない。
-                // 既存システムの朝一バッチはここで例外を上まで投げてしまい、WordPressが
-                // 503を1回返しただけで、その後の全レースの出走表が作られないまま
-                // 異常終了していた（笠松が丸ごと欠けた原因）。同じ壊れ方をしないよう、
-                // レース単位で捕まえて次へ進む。WordPressClient側でも再送はするので、
-                // ここまで来るのは再送しても駄目だった場合だけ。
-                bool applied;
-                try
-                {
-                    applied = _wp.UpsertFactorsAsync(raceKey, scores).GetAwaiter().GetResult();
-                }
-                catch (Exception ex)
-                {
-                    failed++;
-                    Console.WriteLine(
-                        $"[{_source.SourceName}] {slug} 6ファクターの反映に失敗（このレースのみスキップして続行）: {ex.Message}");
-                    continue;
-                }
-
-                if (!applied)
-                {
-                    // 出走表がまだWordPressに無いレース。ここで投稿を作ると馬名の無い
-                    // 空のレースができてしまうため送信しない（WordPressClient側のコメント参照）。
-                    skipped++;
-                    Console.WriteLine(
-                        $"[{_source.SourceName}] {slug} 出走表がWordPressにまだ無いため6ファクターの反映を見送りました" +
-                        "（朝一バッチで出走表が作られた後、次回のscore実行で反映されます）");
-                    continue;
-                }
-
-                published++;
+                computed++;
                 var withAny = scores.Count(kv => HasAnyScore(kv.Value));
                 Console.WriteLine(
-                    $"[{_source.SourceName}] {slug} 6ファクター反映完了: {scores.Count}頭中{withAny}頭に" +
+                    $"[{_source.SourceName}] {slug} 6ファクター/AI指数算出完了: {scores.Count}頭中{withAny}頭に" +
                     "何らかのスコアあり（血統・調教等、母集団不足やデータ未取得のものはnullのまま）");
             }
 
-            var notes = new List<string>();
-            if (skipped > 0) notes.Add($"{skipped}レースは出走表未作成のため見送り");
-            if (failed > 0) notes.Add($"{failed}レースは送信失敗");
-            var note = notes.Count > 0 ? $"（{string.Join("、", notes)}）" : "";
+            var note = failed > 0 ? $"（{failed}レースは計算失敗）" : "";
             Console.WriteLine(
-                $"[{_source.SourceName}] {targetDate:yyyy-MM-dd} 6ファクター算出 {published}レース 完了{note}");
+                $"[{_source.SourceName}] {targetDate:yyyy-MM-dd} 6ファクター/AI指数算出 {computed}レース 完了{note}");
 
             LogVenueTop5(targetDate, raceKeys.Values.Select(k => k.TrackCode).Distinct());
 
-            // 送信失敗があった日は、次回のscore実行で拾い直せるよう終了コードに残す。
+            // 計算失敗があった日は、次回のscore実行で拾い直せるよう終了コードに残す。
             if (failed > 0)
                 throw new InvalidOperationException(
-                    $"{failed}レースの反映に失敗しました（他のレースは反映済み）。次回のscore実行で再試行されます。");
+                    $"{failed}レースの計算に失敗しました（他のレースは算出済み）。次回のscore実行で再試行されます。");
         }
 
         /// <summary>仕様書§9 AI指数TOP5をログ出力する。WordPressへの実publishはContent Generator/

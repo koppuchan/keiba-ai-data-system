@@ -11,9 +11,11 @@
         しかも失敗に気づかず再開すると、修正前のexeがそのまま動き続ける。
       - Stop-ScheduledTask はバッチを止めるだけで、そこから起動された
         KeibaDataCollector.exe が残ることがある。
-      - タスク定義を置き換えると実行中のインスタンスが終了する。watchは
-        トリガーが1日1回なので、日中にやるとその日はもう動かない
-        （2026-08-11に発生。結果の反映が57レース中18レースで止まった）。
+      - タスク定義を置き換えると実行中のインスタンスが終了する。1日1回のみの
+        タスク（backfill/trendmorning/trendfinal/verify）は、日中にやるとその日は
+        もう動かない（既存システムのwatchで2026-08-11に実際に発生。結果の反映が
+        57レース中18レースで止まった。同じ壊れ方をしないよう、繰り返し実行系の
+        タスクは再登録後に必ず再開する設計にしている）。
 
     ビルドに失敗した場合はタスクを再開せずに中断する。
     修正前のexeで動き続けるほうが、止まっているより気づきにくく害が大きい。
@@ -50,9 +52,12 @@ $ErrorActionPreference = 'Stop'
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $scriptDir
 
-# 常駐・繰り返し実行されるタスク。停止したら最後に必ず戻す。
-$RunningTasks = @("$TaskPrefix-Watch", "$TaskPrefix-Predict")
-$AllTasks     = @("$TaskPrefix-Morning") + $RunningTasks
+# 日中に繰り返し実行されるタスク。ビルド前に止めたら最後に必ず戻す
+# （1回のみのタスクは、止まっても翌日以降の予定実行で自然に拾われるため戻さない）。
+$RunningTasks = @("$TaskPrefix-Score", "$TaskPrefix-Content", "$TaskPrefix-TrendLive", "$TaskPrefix-Dashboard")
+# 登録済みの全タスク（$TaskPrefix-*）を動的に取得して止める。ハードコードすると
+# register-scheduled-tasks.ps1側でタスクを追加・変更した際にここが古いままになるため。
+$AllTasks = @(Get-ScheduledTask -TaskName "$TaskPrefix-*" -ErrorAction SilentlyContinue | ForEach-Object { $_.TaskName })
 
 function Write-Step([string] $message) {
     Write-Output ""
@@ -131,10 +136,9 @@ Get-ScheduledTask -TaskName "$TaskPrefix-*" | Format-Table TaskName, State -Auto
 
 $today = Get-Date -Format 'yyyyMMdd'
 Write-Step '数分後に確認してください'
-Write-Output "  Get-Content '.\logs\predict-$today.log' -Encoding UTF8 | Select-String '反映完了'"
-Write-Output "  Get-Content '.\logs\watch-$today.log'   -Encoding UTF8 -Tail 20"
+Write-Output "  Get-Content '.\logs\score-$today.log'   -Encoding UTF8 | Select-String '算出完了'"
+Write-Output "  Get-Content '.\logs\content-$today.log' -Encoding UTF8 | Select-String '公開完了'"
 Write-Output ""
 Write-Output "確認ポイント:"
-Write-Output "  ・予想: 「（所要 ◯分）」が繰り返し間隔(15分)を超えていないこと"
-Write-Output "  ・予想: 「オッズ取得エラー」が0件であること"
-Write-Output "  ・監視: 「監視中... メモリ◯MB」が横ばいであること"
+Write-Output "  ・score: 「（所要 ◯分）」が繰り返し間隔(20分)を超えていないこと"
+Write-Output "  ・content: WordPress公開の失敗が続いていないこと"

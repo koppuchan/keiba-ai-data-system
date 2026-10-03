@@ -12,7 +12,8 @@ namespace KeibaDataCollector.Data
     /// WordPress側に何年分ものレース結果を貯めて集計するのは無理がある
     /// （表示用サイトを分析用DBに転用することになり、パフォーマンスにも影響する）ため、
     /// 収集アプリと同じVPS上にSQLiteファイルを持ち、集計はすべてこちら側で完結させる。
-    /// WordPressへは、集計済みの0〜100点スコア（hrc_factors）だけを送る想定。
+    /// WordPressへは、集計済みの0〜100点スコア（AI指数・6ファクター）を元にした
+    /// contentコマンドの生成物だけを送る想定（生の履歴データ自体は外へ出さない）。
     ///
     /// 3年分・中央+地方競馬という規模を想定し、素朴なORMは使わずADO.NETを直接使う
     /// （数百万行規模になりうるため、余計な抽象化のオーバーヘッドを避ける）。
@@ -29,13 +30,8 @@ namespace KeibaDataCollector.Data
 
         public HistoricalDataStore(string dbPath)
         {
-            var dir = Path.GetDirectoryName(dbPath);
-            if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
-                Directory.CreateDirectory(dir);
-
             var isNew = !File.Exists(dbPath);
-            _conn = new SQLiteConnection($"Data Source={dbPath};Version=3;");
-            _conn.Open();
+            _conn = SqliteConnections.Open(dbPath);
 
             if (isNew)
                 Console.WriteLine($"[HistoricalDataStore] 新規DBを作成: {dbPath}");
