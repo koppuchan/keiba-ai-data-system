@@ -150,6 +150,10 @@ namespace KeibaDataCollector.Services
         private void ReadAndReportTypeBreakdown(string dataSpec, string specName)
         {
             var typeCounts = new Dictionary<string, int>();
+            // レコード種別ごとの最初の1件。長さ（バイト数）と先頭部分、UMは3代血統の父・母父を
+            // 出し、定義の無い地方独自レコード(NU等)やUMの旧形式が、既存の構造体で読めるかを
+            // 実データで判断する材料にする（読めない場合にレイアウトを推測で決めないため）。
+            var firstSamples = new Dictionary<string, (int Size, string Raw)>();
             // HC/WCは日付範囲を見て、実際に何年分取れているか（全履歴なのか直近の差分だけなのか）を
             // 判断する材料にする。件数だけでは「多いから全履歴」と誤解しかねない
             // （実機確認: BLOD(旧dataspec)のSKは8,302件しか無く、全履歴にしては少なすぎた）。
@@ -170,6 +174,7 @@ namespace KeibaDataCollector.Services
 
                     var typeId = JvRecordParser.GetRecordTypeId(buffer);
                     typeCounts[typeId] = typeCounts.TryGetValue(typeId, out var c) ? c + 1 : 1;
+                    if (!firstSamples.ContainsKey(typeId)) firstSamples[typeId] = (size, buffer);
 
                     DateTime? recordDate = null;
                     try
@@ -202,6 +207,25 @@ namespace KeibaDataCollector.Services
                 : "（レコードなし。この期間・このソースにはデータが無いだけの可能性もあるため即NGとは限らない）";
             var dateRange = minDate.HasValue ? $" 日付範囲=[{minDate:yyyy-MM-dd}〜{maxDate:yyyy-MM-dd}]" : "";
             Console.WriteLine($"[{_source.SourceName}] {dataSpec}({specName}): rc=0 レコード種別=[{breakdown}]{dateRange}");
+
+            foreach (var kv in firstSamples.Where(x => x.Key == "UM" || x.Key.StartsWith("N")))
+                Console.WriteLine($"    サンプル {kv.Key}: {DescribeSample(kv.Key, kv.Value.Size, kv.Value.Raw)}");
+        }
+
+        private static string DescribeSample(string typeId, int size, string raw)
+        {
+            var head = raw.Length > 90 ? raw.Substring(0, 90) : raw;
+            var text = $"長さ={size} 先頭=[{head.Replace("\r", "").Replace("\n", "")}]";
+            if (typeId != "UM") return text;
+            try
+            {
+                var um = JvFactorRecordParser.ParseHorseMasterPedigree(raw);
+                return text + $" ／既存(新形式)の読み取り: 血統登録番号={um.KettoNum} 父={um.SireHansyokuNum} 母父={um.BroodmareSireHansyokuNum}";
+            }
+            catch (Exception ex)
+            {
+                return text + $" ／既存(新形式)では読めない: {ex.GetType().Name}";
+            }
         }
 
         private void ProbeRealtimeSpec(RaceKey raceKey, string dataSpec, string specName)
