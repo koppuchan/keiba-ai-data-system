@@ -219,8 +219,8 @@ Register-KeibaTask -TaskName "$TaskPrefix-TrendLive" -BatPath $trendBat -StartTi
     -RepeatEvery (New-TimeSpan -Minutes 30) -RepeatFor (New-TimeSpan -Hours 12)
 
 Register-KeibaTask -TaskName "$TaskPrefix-Content" -BatPath $contentBat -StartTime $ContentTime `
-    -Description '発走前〜レース間: 狙い馬・穴馬・危険な人気馬を生成・検証し、AI指数TOP5・傾向とまとめてWordPressへ公開する（繰り返し。Scoreの後に走るよう開始時刻をずらしてある）' `
-    -RepeatEvery (New-TimeSpan -Minutes 20) -RepeatFor (New-TimeSpan -Hours 14)
+    -Description '発走前〜レース間: 狙い馬・穴馬・危険な人気馬を生成・検証し、AI指数TOP5・傾向とまとめてWordPressへ公開する（繰り返し。Scoreの後に走るよう開始時刻をずらしてある。TrendFinal(21:30)の結果も公開できるよう23:40まで繰り返す）' `
+    -RepeatEvery (New-TimeSpan -Minutes 20) -RepeatFor (New-TimeSpan -Hours 16)
 
 Register-KeibaTask -TaskName "$TaskPrefix-TrendFinal" -BatPath $trendBat -StartTime $TrendFinalTime `
     -Argument 'final' `
