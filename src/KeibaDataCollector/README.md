@@ -17,6 +17,7 @@ KeibaDataCollector.exe dbstats     # 蓄積済みSQLiteの件数・日付範囲�
 KeibaDataCollector.exe trend       # 本日の傾向（脚質・枠・馬場・上がり・通過順）を算出（ローカルのみ）
 KeibaDataCollector.exe content     # 狙い馬・穴馬・危険な人気馬を生成・検証・公開（新規keiba_digest投稿へ）
 KeibaDataCollector.exe verify      # predictionsを確定着順と突き合わせて検証（ローカルのみ）
+KeibaDataCollector.exe backup      # historical.sqlite3のバックアップを作成（直近14世代保持、data\backup\）
 KeibaDataCollector.exe stats       # 指数帯別の3着内率・勝率を表示
 KeibaDataCollector.exe licensegate # LicenseGateの確認・更新（下記）
 KeibaDataCollector.exe weights     # AI指数6ファクターの重み設定の確認・更新
@@ -113,6 +114,7 @@ powershell -ExecutionPolicy Bypass -File .\register-scheduled-tasks.ps1
 
 | タスク | 既定時刻 | 内容 |
 | --- | --- | --- |
+| `KeibaAiDataSystem-Backup` | 01:30（1回） | 深夜: DBのバックアップ（仕様書§12） |
 | `KeibaAiDataSystem-BackfillIncremental` | 02:00（1回） | 深夜: 履歴データの差分取得 |
 | `KeibaAiDataSystem-Morning` | 07:00（1回） | 早朝: 当日の出走表取得 |
 | `KeibaAiDataSystem-Score` | 07:30〜（20分毎/14時間） | 朝〜発走前〜レース間: AI指数算出 |
