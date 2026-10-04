@@ -249,6 +249,7 @@ namespace KeibaDataCollector
                         // 6ファクター用の履歴取得。WordPressには書き込まない
                         // （ローカルSQLiteに蓄積するだけ）。
                         var isIncremental = Array.IndexOf(args, "incremental") >= 0;
+                        var pedigreeOnly = Array.IndexOf(args, "pedigree") >= 0;
                         var sourceArg = Array.Find(args, a => a == "jv" || a == "uma");
                         var targetJv = sourceArg == null || sourceArg == "jv";
                         var targetUma = sourceArg == null || sourceArg == "uma";
@@ -262,8 +263,8 @@ namespace KeibaDataCollector
 
                         using (var store = new HistoricalDataStore(AppConfig.HistoricalDbPath))
                         {
-                            if (targetJv) RunBackfillFor(jvLink, store, backfillOption);
-                            if (targetUma) RunBackfillFor(umaConn, store, backfillOption);
+                            if (targetJv) RunBackfillFor(jvLink, store, backfillOption, pedigreeOnly);
+                            if (targetUma) RunBackfillFor(umaConn, store, backfillOption, pedigreeOnly);
                         }
                         break;
                     }
@@ -385,6 +386,7 @@ namespace KeibaDataCollector
             Console.WriteLine("              引数なし: 全履歴(option=Setup)。手動実行専用。");
             Console.WriteLine("              incremental: 差分のみ(option=Normal)。無人実行可。");
             Console.WriteLine("              ソースを絞る場合: backfill jv / backfill uma");
+            Console.WriteLine("              血統データだけ取り直す場合: backfill pedigree jv");
             Console.WriteLine("  dbstats     : backfillで蓄積したSQLiteの件数・日付範囲を確認する。");
             Console.WriteLine("  trend       : 本日の傾向（脚質・枠・馬場・上がり・通過順）を算出する。");
             Console.WriteLine("              trend <morning|live|final> [yyyy-MM-dd]");
@@ -470,7 +472,7 @@ namespace KeibaDataCollector
         /// それぞれ独立してtry/catchする: 例えば血統(BLOD)がこの契約では提供されていない場合でも、
         /// レース履歴(RACE)や調教データだけは取り込めるようにするため。</summary>
         private static void RunBackfillFor(JvSpecComDataSource source, HistoricalDataStore store,
-            DataOption dataOption)
+            DataOption dataOption, bool pedigreeOnly)
         {
             try
             {
@@ -484,9 +486,12 @@ namespace KeibaDataCollector
 
             var backfill = new BackfillService(source, store, dataOption);
 
-            RunOneBackfillStep(source.SourceName, "RACE(レース履歴)", backfill.BackfillRaceEntries);
-            RunOneBackfillStep(source.SourceName, "SLOP(坂路調教)", backfill.BackfillSlopeTraining);
-            RunOneBackfillStep(source.SourceName, "WOOD(ウッドチップ調教)", backfill.BackfillWoodChipTraining);
+            if (!pedigreeOnly)
+            {
+                RunOneBackfillStep(source.SourceName, "RACE(レース履歴)", backfill.BackfillRaceEntries);
+                RunOneBackfillStep(source.SourceName, "SLOP(坂路調教)", backfill.BackfillSlopeTraining);
+                RunOneBackfillStep(source.SourceName, "WOOD(ウッドチップ調教)", backfill.BackfillWoodChipTraining);
+            }
             RunOneBackfillStep(source.SourceName, "BLOD(血統)", backfill.BackfillPedigree);
         }
 
