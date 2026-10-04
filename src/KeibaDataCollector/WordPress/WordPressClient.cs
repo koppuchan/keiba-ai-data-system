@@ -308,7 +308,7 @@ namespace KeibaDataCollector.WordPress
 
             var requestPayload = new
             {
-                title = $"{payload.RaceDate:yyyy/MM/dd} {payload.TrackCode} 本日のAI指数・傾向・狙い目",
+                title = $"{payload.RaceDate:yyyy/MM/dd} {VenueNames.Get(payload.TrackCode)} 本日のAI指数・傾向・狙い目",
                 status = "publish",
                 meta = new
                 {

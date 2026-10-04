@@ -99,8 +99,8 @@ namespace KeibaDataCollector.Services
                 BabaConditionCode = t.BabaConditionCode,
                 Category = "AiIndexTop5",
                 ContentText = string.IsNullOrEmpty(t.HorseName)
-                    ? $"AI指数TOP5: {t.RaceNumber}R {t.Umaban}番 指数{t.AiIndex:0.1}"
-                    : $"AI指数TOP5: {t.RaceNumber}R {t.Umaban}番{t.HorseName} 指数{t.AiIndex:0.1}",
+                    ? $"AI指数TOP5: {t.RaceNumber}R {t.Umaban}番 指数{t.AiIndex:0.0}"
+                    : $"AI指数TOP5: {t.RaceNumber}R {t.Umaban}番{t.HorseName} 指数{t.AiIndex:0.0}",
                 Reasons = new List<string> { $"ai_index={t.AiIndex:0.00}", $"data_completeness={t.DataCompleteness:0.00}" },
                 AiIndexSnapshot = t.AiIndex,
                 ModelVersion = t.ModelVersion,
