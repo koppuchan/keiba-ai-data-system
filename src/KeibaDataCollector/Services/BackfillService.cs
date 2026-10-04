@@ -368,6 +368,13 @@ namespace KeibaDataCollector.Services
         {
             BackfillPedigreeSpec("BLDN", BackfillFromTime, isLegacyFormat: false);
             BackfillPedigreeSpec("BLOD", PedigreeLegacyFromTime, isLegacyFormat: true);
+
+            // SK/HNだけでは出走馬の一部（実機: 出走実績33,160頭に対し8,290頭）しか血統が引けず、
+            // 中央競馬の血統適性(⑤)が全馬nullになっていた。競走馬マスタ(UM、DIFN)は
+            // 3代血統を馬ごとに持つため、これで出走馬全体を補う。地方(UmaConn)のDIFNは
+            // UMではなく別形式(NU)を返し、その構造体定義がまだ無いため対象外。
+            if (_source.SourceName.Contains("中央"))
+                BackfillPedigreeSpec("DIFN", PedigreeLegacyFromTime, isLegacyFormat: false);
         }
 
         private void BackfillPedigreeSpec(string dataSpec, string fromTime, bool isLegacyFormat)
@@ -389,7 +396,7 @@ namespace KeibaDataCollector.Services
 
             Console.WriteLine($"[{_source.SourceName}] {dataSpec} {ModeLabel}を開始します（{(isLegacyFormat ? "旧8バイト形式" : "新10バイト形式")}）。");
 
-            int totalRecords = 0, skCount = 0, hnCount = 0;
+            int totalRecords = 0, skCount = 0, hnCount = 0, umCount = 0;
             int? minBirthYear = null, maxBirthYear = null;
             var batch = _store.BeginBatch();
             try
@@ -421,6 +428,14 @@ namespace KeibaDataCollector.Services
                             if (!maxBirthYear.HasValue || y > maxBirthYear) maxBirthYear = y;
                         }
                     }
+                    else if (typeId == "UM" && dataSpec == "DIFN")
+                    {
+                        umCount++;
+                        var link = JvFactorRecordParser.ParseHorseMasterPedigree(buffer);
+                        if (!string.IsNullOrEmpty(link.KettoNum) &&
+                            (!string.IsNullOrEmpty(link.SireHansyokuNum) || !string.IsNullOrEmpty(link.BroodmareSireHansyokuNum)))
+                            _store.UpsertPedigreeLink(link);
+                    }
                     else if (typeId == "HN")
                     {
                         hnCount++;
@@ -435,7 +450,7 @@ namespace KeibaDataCollector.Services
                     {
                         batch.Dispose();
                         batch = _store.BeginBatch();
-                        Console.WriteLine($"[{_source.SourceName}] {dataSpec}進捗: {totalRecords}件処理（SK:{skCount} HN:{hnCount}）");
+                        Console.WriteLine($"[{_source.SourceName}] {dataSpec}進捗: {totalRecords}件処理（SK:{skCount} HN:{hnCount} UM:{umCount}）");
                     }
                 }
             }
@@ -446,7 +461,7 @@ namespace KeibaDataCollector.Services
             }
 
             var birthYearRange = minBirthYear.HasValue ? $" 産駒の生年範囲=[{minBirthYear}〜{maxBirthYear}]" : "";
-            Console.WriteLine($"[{_source.SourceName}] {dataSpec}取り込み完了: 全{totalRecords}件, SK={skCount}, HN={hnCount}{birthYearRange}");
+            Console.WriteLine($"[{_source.SourceName}] {dataSpec}取り込み完了: 全{totalRecords}件, SK={skCount}, HN={hnCount}, UM={umCount}{birthYearRange}");
         }
 
         private static string RaceInfoKey(string year, string monthDay, string jyoCd, string raceNum) =>
