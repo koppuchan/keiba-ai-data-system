@@ -4,14 +4,14 @@
  * Description: KeibaDataCollector（JRAVAN+競馬最強の法則WEB 全自動AI競馬データシステム）から送られる
  *              AI指数TOP5・本日の傾向・狙い馬/穴馬/危険な人気馬を、開催場・日単位のカスタム投稿タイプ
  *              「keiba_digest」として受け取り、表示する。既存の Keiba Race Sync（race投稿）とは別。
- * Version: 0.2.0
+ * Version: 0.3.0
  */
 
 if (!defined('ABSPATH')) {
     exit;
 }
 
-define('KEIBA_AI_DIGEST_VERSION', '0.2.0');
+define('KEIBA_AI_DIGEST_VERSION', '0.3.0');
 define('KEIBA_AI_DIGEST_JSON_META_KEYS', array(
     'ai_index_top5',
     'trend_morning',
@@ -473,19 +473,27 @@ function keiba_ai_digest_render_trend_stage($trend)
     echo '</h3>';
 
     $weather = isset($trend['weatherTrack']) ? $trend['weatherTrack'] : null;
-    $codes = $weather ? array(
-        $weather['weatherCode'] ?? '',
-        $weather['turfConditionCode'] ?? '',
-        $weather['dirtConditionCode'] ?? '',
-    ) : array();
-    // コードが未設定（空または0）の間は表示しない。コード表→表示名の変換は、公式コード表で
-    // 確認が取れるまで行わず、設定済みの場合のみ生のコード値を出す。
-    if (array_filter($codes, function ($c) { return $c !== '' && $c !== '0'; })) {
-        echo '<p class="keiba-ai-digest-weather">'
-            . '天候コード: ' . esc_html($codes[0] !== '' ? $codes[0] : '-')
-            . ' / 芝馬場コード: ' . esc_html($codes[1] !== '' ? $codes[1] : '-')
-            . ' / ダート馬場コード: ' . esc_html($codes[2] !== '' ? $codes[2] : '-')
-            . '</p>';
+    // JV-Dataコード表: 2011 天候コード / 2010 馬場状態コード。0は未設定（初期値）のため表示しない。
+    // 表に無いコードは推測せず生のコード値をそのまま出す。
+    $weather_labels = array('1' => '晴', '2' => '曇', '3' => '雨', '4' => '小雨', '5' => '雪', '6' => '小雪');
+    $going_labels = array('1' => '良', '2' => '稍重', '3' => '重', '4' => '不良');
+    $parts = array();
+    if ($weather) {
+        $items = array(
+            array('天候', $weather['weatherCode'] ?? '', $weather_labels),
+            array('芝', $weather['turfConditionCode'] ?? '', $going_labels),
+            array('ダート', $weather['dirtConditionCode'] ?? '', $going_labels),
+        );
+        foreach ($items as $item) {
+            list($name, $code, $labels) = $item;
+            if ($code === '' || $code === '0') {
+                continue;
+            }
+            $parts[] = $name . ': ' . (isset($labels[$code]) ? $labels[$code] : 'コード' . $code);
+        }
+    }
+    if ($parts) {
+        echo '<p class="keiba-ai-digest-weather">' . esc_html(implode(' / ', $parts)) . '</p>';
     }
 
     echo '<ul class="keiba-ai-digest-trend-list">';
