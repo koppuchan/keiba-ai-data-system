@@ -129,8 +129,8 @@ namespace KeibaDataCollector.Services
             var topFactor = TopFactor(best.Factors);
             var horse = DisplayHorse(best);
             var text = topFactor == null
-                ? $"{race.RaceNumber}Rの狙い馬は{horse}。AI指数{best.AiIndex:0.1}（データ充足率{best.DataCompleteness:P0}）で当レース内トップ評価。"
-                : $"{race.RaceNumber}Rの狙い馬は{horse}。AI指数{best.AiIndex:0.1}（データ充足率{best.DataCompleteness:P0}）で当レース内トップ評価。{topFactor.Value.Name}が特に高評価（{topFactor.Value.Value:0.1}）。";
+                ? $"{race.RaceNumber}Rの狙い馬は{horse}。AI指数{best.AiIndex:0.0}（データ充足率{best.DataCompleteness:P0}）で当レース内トップ評価。"
+                : $"{race.RaceNumber}Rの狙い馬は{horse}。AI指数{best.AiIndex:0.0}（データ充足率{best.DataCompleteness:P0}）で当レース内トップ評価。{topFactor.Value.Name}が特に高評価（{topFactor.Value.Value:0.0}）。";
 
             return new GeneratedPick
             {
@@ -169,7 +169,7 @@ namespace KeibaDataCollector.Services
 
             var indexRank = rankedByIndex.IndexOf(best) + 1;
             var text = $"{race.RaceNumber}Rの穴馬は{DisplayHorse(best)}。{best.Ninki}番人気（単勝{best.TanshoOdds:0.0}倍）ながら、" +
-                       $"AI指数は{best.AiIndex:0.1}で出走{fieldSize}頭中{indexRank}位相当。人気とのギャップに妙味あり。";
+                       $"AI指数は{best.AiIndex:0.0}で出走{fieldSize}頭中{indexRank}位相当。人気とのギャップに妙味あり。";
 
             return new GeneratedPick
             {
@@ -203,8 +203,8 @@ namespace KeibaDataCollector.Services
                 var concern = WeakestFactor(c.Factors, KikenFactorConcernThreshold);
                 if (concern == null) continue; // 明確な弱点が無ければ「危険」とは書かない。
 
-                var text = $"{race.RaceNumber}Rの{c.Ninki}番人気{DisplayHorse(c)}は、{concern.Value.Name}が{concern.Value.Value:0.1}と平均を下回っており注意。" +
-                           (c.AiIndex.HasValue ? $"AI指数は{c.AiIndex:0.1}。" : "AI指数は算出できていない。");
+                var text = $"{race.RaceNumber}Rの{c.Ninki}番人気{DisplayHorse(c)}は、{concern.Value.Name}が{concern.Value.Value:0.0}と平均を下回っており注意。" +
+                           (c.AiIndex.HasValue ? $"AI指数は{c.AiIndex:0.0}。" : "AI指数は算出できていない。");
 
                 result.Add(new GeneratedPick
                 {
