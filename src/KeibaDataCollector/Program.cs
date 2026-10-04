@@ -70,6 +70,20 @@ namespace KeibaDataCollector
                 }
                 return;
             }
+            if (mode == "backup")
+            {
+                try
+                {
+                    var dest = BackupService.Run(AppConfig.HistoricalDbPath, keep: 14);
+                    Console.WriteLine($"[backup] バックアップを作成しました: {dest}");
+                    LogSuccess("backup", "DBバックアップ", "正常終了");
+                }
+                catch (Exception ex)
+                {
+                    LogFailure("backup", "DBバックアップに失敗", ex, critical: true);
+                }
+                return;
+            }
             if (mode == "stats")
             {
                 using (var historical = new HistoricalDataStore(AppConfig.HistoricalDbPath))
@@ -355,7 +369,7 @@ namespace KeibaDataCollector
 
         private static void PrintUsage()
         {
-            Console.WriteLine("使い方: KeibaDataCollector.exe [setup|morning|predict|score|watch|probe|backfill|dbstats|trend|content|verify|licensegate|weights|stats|dashboard]");
+            Console.WriteLine("使い方: KeibaDataCollector.exe [setup|morning|predict|score|watch|probe|backfill|dbstats|trend|content|verify|backup|licensegate|weights|stats|dashboard]");
             Console.WriteLine("  setup       : 初回のみ。利用キー等をGUIダイアログで設定する。");
             Console.WriteLine("  morning     : 朝一バッチ。当日の出走表を取得しWordPressへ反映する。");
             Console.WriteLine("  predict     : 朝一オッズの人気順から予想印を生成しWordPressへ反映する。");
@@ -379,6 +393,7 @@ namespace KeibaDataCollector
             Console.WriteLine("              content [yyyy-MM-dd]");
             Console.WriteLine("  verify      : predictionsを確定着順と突き合わせてverificationへ記録する。");
             Console.WriteLine("              verify [yyyy-MM-dd]");
+            Console.WriteLine("  backup      : historical.sqlite3のバックアップを作成する（直近14世代を保持）。");
             Console.WriteLine("  stats       : 指数帯別の3着内率・勝率を表示する（要:事前のverify実行）。");
             Console.WriteLine("              stats <Nerai|Ana|Kiken|AiIndexTop5> <modelVersion>");
             Console.WriteLine("  licensegate : LicenseGate（公開許諾状態）の確認・更新。詳細は `licensegate` (引数なし) 実行。");
