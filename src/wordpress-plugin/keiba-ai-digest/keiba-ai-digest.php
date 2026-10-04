@@ -4,14 +4,14 @@
  * Description: KeibaDataCollector（JRAVAN+競馬最強の法則WEB 全自動AI競馬データシステム）から送られる
  *              AI指数TOP5・本日の傾向・狙い馬/穴馬/危険な人気馬を、開催場・日単位のカスタム投稿タイプ
  *              「keiba_digest」として受け取り、表示する。既存の Keiba Race Sync（race投稿）とは別。
- * Version: 0.1.0
+ * Version: 0.2.0
  */
 
 if (!defined('ABSPATH')) {
     exit;
 }
 
-define('KEIBA_AI_DIGEST_VERSION', '0.1.0');
+define('KEIBA_AI_DIGEST_VERSION', '0.2.0');
 define('KEIBA_AI_DIGEST_JSON_META_KEYS', array(
     'ai_index_top5',
     'trend_morning',
@@ -375,14 +375,13 @@ function keiba_ai_digest_render_digest($post_id)
     }
 
     $top5 = keiba_ai_digest_decode_meta($post_id, 'ai_index_top5');
-    $trend_final = keiba_ai_digest_decode_meta($post_id, 'trend_final');
-    $trend_live = keiba_ai_digest_decode_meta($post_id, 'trend_live');
-    $trend_morning = keiba_ai_digest_decode_meta($post_id, 'trend_morning');
+    $trends = array(
+        keiba_ai_digest_decode_meta($post_id, 'trend_morning'),
+        keiba_ai_digest_decode_meta($post_id, 'trend_live'),
+        keiba_ai_digest_decode_meta($post_id, 'trend_final'),
+    );
     $picks = keiba_ai_digest_decode_meta($post_id, 'picks');
-
-    // 終了後 > 開催中 > 朝、の順で最も新しい段階のものを表示する（各段階は独立して
-    // 保存されており、自動で遷移しないため。KeibaDataCollector README参照）。
-    $trend = $trend_final ?: ($trend_live ?: $trend_morning);
+    $updated_at = get_post_meta($post_id, 'updated_at', true);
 
     ob_start();
     echo '<div class="keiba-ai-digest">';
@@ -392,8 +391,12 @@ function keiba_ai_digest_render_digest($post_id)
         . 'レースの結果や利益を保証するものではありません。'
         . '</p>';
 
+    if ($updated_at) {
+        echo '<p class="keiba-ai-digest-updated">最終更新: ' . esc_html(keiba_ai_digest_format_time($updated_at)) . '</p>';
+    }
+
     keiba_ai_digest_render_top5($top5);
-    keiba_ai_digest_render_trend($trend);
+    keiba_ai_digest_render_trends($trends);
     keiba_ai_digest_render_picks($picks);
 
     echo '</div>';
@@ -427,27 +430,61 @@ function keiba_ai_digest_render_top5($top5)
     echo '</section>';
 }
 
-/** 仕様書§10 本日の傾向。 */
-function keiba_ai_digest_render_trend($trend)
+/** 日時文字列（UTC/オフセット付きISO）をサイトのタイムゾーンで表示用に整形する。 */
+function keiba_ai_digest_format_time($value)
 {
-    if (empty($trend) || !is_array($trend)) {
+    $text = (string) $value;
+    // タイムゾーン表記が無い値はUTCとして扱う（収集アプリはUTCで保存している）。
+    if (!preg_match('/(Z|[+-]\d{2}:?\d{2})$/', $text)) {
+        $text .= 'Z';
+    }
+    $ts = strtotime($text);
+    return $ts ? wp_date('Y/m/d H:i', $ts) : (string) $value;
+}
+
+/** 仕様書§10 本日の傾向。朝・開催中・終了後の各段階を、保存されているものだけ並べて表示する。 */
+function keiba_ai_digest_render_trends($trends)
+{
+    $present = array_filter($trends, function ($t) {
+        return !empty($t) && is_array($t);
+    });
+    if (empty($present)) {
         return;
     }
 
+    echo '<section class="keiba-ai-digest-section keiba-ai-digest-trend">';
+    echo '<h2>本日の傾向</h2>';
+    foreach ($present as $trend) {
+        keiba_ai_digest_render_trend_stage($trend);
+    }
+    echo '</section>';
+}
+
+function keiba_ai_digest_render_trend_stage($trend)
+{
     $stage_label = array('Morning' => '朝（事前想定）', 'Live' => '開催中（現時点）', 'Final' => '終了後（本日の結果）');
     $stage = isset($trend['stage']) ? $trend['stage'] : '';
 
-    echo '<section class="keiba-ai-digest-section keiba-ai-digest-trend">';
-    echo '<h2>本日の傾向' . (isset($stage_label[$stage]) ? ' — ' . esc_html($stage_label[$stage]) : '') . '</h2>';
+    echo '<div class="keiba-ai-digest-trend-stage">';
+    echo '<h3>' . esc_html(isset($stage_label[$stage]) ? $stage_label[$stage] : $stage);
+    if (!empty($trend['computedAtUtc'])) {
+        echo ' <small>（' . esc_html(keiba_ai_digest_format_time($trend['computedAtUtc'])) . '時点）</small>';
+    }
+    echo '</h3>';
 
     $weather = isset($trend['weatherTrack']) ? $trend['weatherTrack'] : null;
-    if ($weather) {
-        // 天候・馬場状態コードの表示文字列変換表は未確認のため、コード値をそのまま出す
-        // （KeibaDataCollector側のChakusaCDと同じ扱い。README参照）。
+    $codes = $weather ? array(
+        $weather['weatherCode'] ?? '',
+        $weather['turfConditionCode'] ?? '',
+        $weather['dirtConditionCode'] ?? '',
+    ) : array();
+    // コードが未設定（空または0）の間は表示しない。コード表→表示名の変換は、公式コード表で
+    // 確認が取れるまで行わず、設定済みの場合のみ生のコード値を出す。
+    if (array_filter($codes, function ($c) { return $c !== '' && $c !== '0'; })) {
         echo '<p class="keiba-ai-digest-weather">'
-            . '天候コード: ' . esc_html($weather['weatherCode'] ?? '-')
-            . ' / 芝馬場コード: ' . esc_html($weather['turfConditionCode'] ?? '-')
-            . ' / ダート馬場コード: ' . esc_html($weather['dirtConditionCode'] ?? '-')
+            . '天候コード: ' . esc_html($codes[0] !== '' ? $codes[0] : '-')
+            . ' / 芝馬場コード: ' . esc_html($codes[1] !== '' ? $codes[1] : '-')
+            . ' / ダート馬場コード: ' . esc_html($codes[2] !== '' ? $codes[2] : '-')
             . '</p>';
     }
 
@@ -490,7 +527,7 @@ function keiba_ai_digest_render_trend($trend)
         echo '</tbody></table></div>';
     }
 
-    echo '</section>';
+    echo '</div>';
 }
 
 /** 仕様書§11 今日の狙い馬・穴馬・危険な人気馬。 */

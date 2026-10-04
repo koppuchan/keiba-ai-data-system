@@ -87,3 +87,18 @@
     color: #999;
     font-style: italic;
 }
+
+.keiba-ai-digest-updated {
+    margin: 0 0 1em;
+    font-size: 0.85em;
+    color: #666;
+}
+
+.keiba-ai-digest-trend-stage + .keiba-ai-digest-trend-stage {
+    margin-top: 1.5em;
+}
+
+.keiba-ai-digest-trend-stage h3 small {
+    font-weight: normal;
+    color: #666;
+}
