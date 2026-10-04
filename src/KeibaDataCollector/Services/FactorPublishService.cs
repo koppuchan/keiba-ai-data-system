@@ -139,6 +139,7 @@ namespace KeibaDataCollector.Services
             }
 
             int computed = 0, failed = 0;
+            var coverage = new FactorCoverage();
             foreach (var slug in entriesByRace.Keys)
             {
                 var raceKey = raceKeys[slug];
@@ -169,6 +170,7 @@ namespace KeibaDataCollector.Services
                 }
 
                 computed++;
+                foreach (var f in scores.Values) coverage.Add(f);
                 var withAny = scores.Count(kv => HasAnyScore(kv.Value));
                 Console.WriteLine(
                     $"[{_source.SourceName}] {slug} 6ファクター/AI指数算出完了: {scores.Count}頭中{withAny}頭に" +
@@ -178,6 +180,8 @@ namespace KeibaDataCollector.Services
             var note = failed > 0 ? $"（{failed}レースは計算失敗）" : "";
             Console.WriteLine(
                 $"[{_source.SourceName}] {targetDate:yyyy-MM-dd} 6ファクター/AI指数算出 {computed}レース 完了{note}");
+
+            Console.WriteLine($"[{_source.SourceName}] 算出できた馬の割合（全{coverage.Total}頭）: {coverage}");
 
             LogVenueTop5(targetDate, raceKeys.Values.Select(k => k.TrackCode).Distinct());
 
@@ -204,6 +208,32 @@ namespace KeibaDataCollector.Services
                         $"    R{r.RaceNumber} {r.Umaban}番 指数={r.AiIndex:0.0} 充足率={r.DataCompleteness:P0} " +
                         $"model={r.ModelVersion}");
                 }
+            }
+        }
+
+        /// <summary>ファクター別に「算出できた馬の数」を数える。データ充足率が低い原因が
+        /// どのファクター（血統・調教等）のデータ欠損かを、ログだけで切り分けられるようにする。</summary>
+        private sealed class FactorCoverage
+        {
+            private int _bias, _pace, _agari, _jockey, _pedigree, _training;
+            public int Total { get; private set; }
+
+            public void Add(FactorScores f)
+            {
+                Total++;
+                if (f.ParamBias.HasValue) _bias++;
+                if (f.ParamPace.HasValue) _pace++;
+                if (f.ParamAgariQ.HasValue) _agari++;
+                if (f.ParamJockeyRoi.HasValue) _jockey++;
+                if (f.ParamPedigreeFit.HasValue) _pedigree++;
+                if (f.ParamTrainingAcc.HasValue) _training++;
+            }
+
+            public override string ToString()
+            {
+                string P(int n) => Total == 0 ? "-" : $"{(double)n / Total:P0}";
+                return $"①枠馬場={P(_bias)} ②テン速度={P(_pace)} ③上がり={P(_agari)} " +
+                       $"④騎手={P(_jockey)} ⑤血統={P(_pedigree)} ⑥調教={P(_training)}";
             }
         }
 
