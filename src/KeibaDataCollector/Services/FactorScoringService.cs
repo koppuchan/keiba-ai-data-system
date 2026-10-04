@@ -276,6 +276,7 @@ namespace KeibaDataCollector.Services
                 FROM race_entries re
                 JOIN pedigree_links pl ON re.ketto_num = pl.ketto_num
                 WHERE re.track_code=@track AND re.distance=@distance AND re.chakujun > 0
+                  AND pl.sire_hansyoku_num IS NOT NULL AND pl.sire_hansyoku_num <> ''
                 GROUP BY pl.sire_hansyoku_num
                 HAVING COUNT(*) >= @minSample;", _conn))
             {

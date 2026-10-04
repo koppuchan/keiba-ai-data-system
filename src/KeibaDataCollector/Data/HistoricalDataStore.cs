@@ -41,6 +41,7 @@ namespace KeibaDataCollector.Data
             MigrateAddRaceNumberColumn();
             MigrateAddEarlyPositionRatioColumn();
             MigrateAddFinalCornerLeaderColumn();
+            CleanUnknownPedigreeIds();
         }
 
         /// <summary>既に稼働中のDB（このカラムが無い状態でbackfill済みのもの）向けの移行措置。
@@ -260,6 +261,32 @@ namespace KeibaDataCollector.Data
                 });
         }
 
+        /// <summary>繁殖登録番号が空、または全桁0（JV-Dataでは「不明・未設定」）ならnull。
+        /// 0のまま保存すると、血統不明の馬が全員「父=0000000000」という架空の種牡馬の
+        /// 産駒として集計され、血統適性が意味の無い値になる。</summary>
+        private static string KnownHansyokuNum(string value) =>
+            string.IsNullOrWhiteSpace(value) || value.Trim().Trim('0').Length == 0 ? null : value.Trim();
+
+        /// <summary>これまでの取り込みで0埋めのまま保存された行を不明（NULL）に直す。</summary>
+        private void CleanUnknownPedigreeIds()
+        {
+            // 毎回の起動でUPDATEを流すと、該当行が無くても書き込みロックを取って他のタスクを
+            // 待たせるため、まず読み取りだけで該当行の有無を確認する。
+            using (var check = new SQLiteCommand(@"
+                SELECT 1 FROM pedigree_links
+                WHERE (sire_hansyoku_num IS NOT NULL AND TRIM(sire_hansyoku_num, '0 ')='')
+                   OR (broodmare_sire_hansyoku_num IS NOT NULL AND TRIM(broodmare_sire_hansyoku_num, '0 ')='')
+                LIMIT 1;", _conn))
+            {
+                if (check.ExecuteScalar() == null) return;
+            }
+
+            Exec(@"UPDATE pedigree_links SET sire_hansyoku_num=NULL
+                   WHERE sire_hansyoku_num IS NOT NULL AND TRIM(sire_hansyoku_num, '0 ')='';");
+            Exec(@"UPDATE pedigree_links SET broodmare_sire_hansyoku_num=NULL
+                   WHERE broodmare_sire_hansyoku_num IS NOT NULL AND TRIM(broodmare_sire_hansyoku_num, '0 ')='';");
+        }
+
         public void UpsertPedigreeLink(PedigreeLink e)
         {
             Exec(@"
@@ -271,8 +298,8 @@ namespace KeibaDataCollector.Data
             ",
                 p => {
                     p.AddWithValue("@ketto_num", e.KettoNum);
-                    p.AddWithValue("@sire", (object)e.SireHansyokuNum ?? DBNull.Value);
-                    p.AddWithValue("@bms", (object)e.BroodmareSireHansyokuNum ?? DBNull.Value);
+                    p.AddWithValue("@sire", (object)KnownHansyokuNum(e.SireHansyokuNum) ?? DBNull.Value);
+                    p.AddWithValue("@bms", (object)KnownHansyokuNum(e.BroodmareSireHansyokuNum) ?? DBNull.Value);
                 });
         }
 
