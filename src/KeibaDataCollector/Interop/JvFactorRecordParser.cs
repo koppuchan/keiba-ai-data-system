@@ -88,6 +88,24 @@ namespace KeibaDataCollector.Interop
             };
         }
 
+        /// <summary>"UM"レコード（競走馬マスタ、dataspec DIFN）の3代血統情報から、父・母父の
+        /// 繁殖登録番号を取り出す。配列の並びはSKレコードのHansyokuNumと同じ
+        /// （[0]=父、[4]=母父）。産駒マスタ(SK)は取得できる馬が少ない（実機: 約8千頭）のに対し、
+        /// 競走馬マスタは登録馬全体（実機probe: 約21.5万件）を返す。</summary>
+        public static PedigreeLink ParseHorseMasterPedigree(string rawRecord)
+        {
+            var um = new JV_UM_UMA();
+            um.SetDataB(ref rawRecord);
+
+            return new PedigreeLink
+            {
+                KettoNum = Trim(um.KettoNum),
+                SireHansyokuNum = Trim(um.Ketto3Info[0].HansyokuNum),
+                BroodmareSireHansyokuNum = Trim(um.Ketto3Info[4].HansyokuNum),
+                BirthDate = ParseYmd(um.BirthDate),
+            };
+        }
+
         /// <summary>"HN"レコード（繁殖馬マスタ）から繁殖登録番号と馬名を取り出す。</summary>
         public static BroodstockName ParseBroodstockName(string rawRecord)
         {
