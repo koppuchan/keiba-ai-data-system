@@ -154,6 +154,7 @@ namespace KeibaDataCollector.Services
             // 出し、定義の無い地方独自レコード(NU等)やUMの旧形式が、既存の構造体で読めるかを
             // 実データで判断する材料にする（読めない場合にレイアウトを推測で決めないため）。
             var firstSamples = new Dictionary<string, (int Size, string Raw)>();
+            string nuPedigreeSample = null;
             // HC/WCは日付範囲を見て、実際に何年分取れているか（全履歴なのか直近の差分だけなのか）を
             // 判断する材料にする。件数だけでは「多いから全履歴」と誤解しかねない
             // （実機確認: BLOD(旧dataspec)のSKは8,302件しか無く、全履歴にしては少なすぎた）。
@@ -175,6 +176,8 @@ namespace KeibaDataCollector.Services
                     var typeId = JvRecordParser.GetRecordTypeId(buffer);
                     typeCounts[typeId] = typeCounts.TryGetValue(typeId, out var c) ? c + 1 : 1;
                     if (!firstSamples.ContainsKey(typeId)) firstSamples[typeId] = (size, buffer);
+                    if (typeId == "NU" && nuPedigreeSample == null)
+                        nuPedigreeSample = DescribeIdRuns(buffer);
 
                     DateTime? recordDate = null;
                     try
@@ -210,6 +213,22 @@ namespace KeibaDataCollector.Services
 
             foreach (var kv in firstSamples.Where(x => x.Key == "UM" || x.Key.StartsWith("N")))
                 Console.WriteLine($"    サンプル {kv.Key}: {DescribeSample(kv.Key, kv.Value.Size, kv.Value.Raw)}");
+            if (nuPedigreeSample != null)
+                Console.WriteLine($"    NUの血統候補（先頭60バイトより後ろにある0以外の10桁数字の位置:値）: {nuPedigreeSample}");
+        }
+
+        /// <summary>NUレコードのうち血統登録番号らしき10桁の数字（全て0ではない）が先頭60バイトより
+        /// 後ろにあれば、その位置と値を返す（無ければnull＝次のレコードで再挑戦）。
+        /// 地方独自のNUはレイアウト未公開のため、父・母父の位置を実データから割り出す材料にする。</summary>
+        private static string DescribeIdRuns(string raw)
+        {
+            var runs = System.Text.RegularExpressions.Regex.Matches(raw, @"\d{10}")
+                .Cast<System.Text.RegularExpressions.Match>()
+                .Where(m => m.Index >= 60 && m.Value.Trim('0').Length > 0)
+                .Take(14)
+                .Select(m => $"{m.Index + 1}:{m.Value}")
+                .ToList();
+            return runs.Count > 0 ? string.Join(" ", runs) : null;
         }
 
         private static string DescribeSample(string typeId, int size, string raw)
