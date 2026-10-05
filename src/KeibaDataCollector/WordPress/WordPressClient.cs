@@ -262,6 +262,20 @@ namespace KeibaDataCollector.WordPress
             }
         }
 
+        /// <summary>AI指数の検証結果（仕様書§18）をサイトの検証ページ用に送る。
+        /// 集計済みの数字だけで、個々の予測・認証情報は含まない。</summary>
+        public async Task PushVerificationReportAsync(VerificationReport report)
+        {
+            var json = JsonConvert.SerializeObject(report, CamelCaseSettings);
+            var content = new StringContent(json, Encoding.UTF8, "application/json");
+            var response = await _http.PostAsync($"{_baseUrl}/wp-json/keiba-ai/v1/verification", content);
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await response.Content.ReadAsStringAsync();
+                throw new InvalidOperationException($"WordPress verification API failed ({response.StatusCode}): {body}");
+            }
+        }
+
         /// <summary>仕様書§17監視ダッシュボードをWordPress管理画面でも確認できるようにする。
         /// 認証情報（Application Password）で認証したPOSTのみ受け付ける
         /// （公開情報のみとはいえ、エラー件数・データソース状態は外部に無条件公開する情報ではないため）。

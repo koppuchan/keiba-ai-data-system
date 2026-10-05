@@ -4,14 +4,14 @@
  * Description: KeibaDataCollector（JRAVAN+競馬最強の法則WEB 全自動AI競馬データシステム）から送られる
  *              AI指数TOP5・本日の傾向・狙い馬/穴馬/危険な人気馬を、開催場・日単位のカスタム投稿タイプ
  *              「keiba_digest」として受け取り、表示する。既存の Keiba Race Sync（race投稿）とは別。
- * Version: 0.4.0
+ * Version: 0.5.0
  */
 
 if (!defined('ABSPATH')) {
     exit;
 }
 
-define('KEIBA_AI_DIGEST_VERSION', '0.4.0');
+define('KEIBA_AI_DIGEST_VERSION', '0.5.0');
 define('KEIBA_AI_DIGEST_JSON_META_KEYS', array(
     'ai_index_top5',
     'trend_morning',
@@ -192,6 +192,25 @@ add_action('rest_api_init', function () {
             update_option('keiba_ai_digest_last_status', $body);
             update_option('keiba_ai_digest_last_status_at', current_time('mysql', true));
             return array('ok' => true);
+        },
+    ));
+
+    // AI指数の検証結果（仕様書§18）。KeibaDataCollectorの`verify`/`verifyreport`がPOSTする。
+    // 集計済みの数字だけを受け取り、公開用の検証ページ（ショートコード）が表示する。
+    register_rest_route('keiba-ai/v1', '/verification', array(
+        'methods' => 'POST',
+        'permission_callback' => function () {
+            return current_user_can('edit_posts');
+        },
+        'callback' => function (WP_REST_Request $request) {
+            $body = $request->get_json_params();
+            if (!is_array($body) || !isset($body['models']) || !is_array($body['models'])) {
+                return new WP_Error('invalid_body', 'models required', array('status' => 400));
+            }
+            update_option('keiba_ai_digest_verification_report', $body, false);
+            update_option('keiba_ai_digest_verification_at', current_time('mysql', true), false);
+            $page_id = keiba_ai_digest_ensure_verification_page();
+            return array('ok' => true, 'pageId' => $page_id);
         },
     ));
 
@@ -398,6 +417,12 @@ function keiba_ai_digest_render_digest($post_id)
             . '</p>';
     }
 
+    $verification_page = (int) get_option('keiba_ai_digest_verification_page_id', 0);
+    if ($verification_page && get_post_status($verification_page) === 'publish') {
+        echo '<p class="keiba-ai-digest-verification-link"><a href="'
+            . esc_url(get_permalink($verification_page)) . '">AI指数の過去検証を見る</a></p>';
+    }
+
     if ($updated_at) {
         echo '<p class="keiba-ai-digest-updated">最終更新: ' . esc_html(keiba_ai_digest_format_time($updated_at)) . '</p>';
     }
@@ -573,4 +598,121 @@ function keiba_ai_digest_render_picks($picks)
         }
         echo '</ul></section>';
     }
+}
+
+/* ------------------------------------------------------------------------- *
+ * AI指数の過去検証ページ（仕様書§18）。検証結果を初めて受け取った時に固定ページを
+ * 自動作成し、ショートコード [keiba_ai_verification] で表示する。
+ * ------------------------------------------------------------------------- */
+
+function keiba_ai_digest_ensure_verification_page()
+{
+    $id = (int) get_option('keiba_ai_digest_verification_page_id', 0);
+    if ($id && get_post_status($id) && get_post_status($id) !== 'trash') {
+        return $id;
+    }
+
+    $id = wp_insert_post(array(
+        'post_type' => 'page',
+        'post_status' => 'publish',
+        'post_title' => 'AI指数の過去検証',
+        'post_name' => 'ai-digest-verification',
+        'post_content' => '[keiba_ai_verification]',
+    ));
+    if (!is_wp_error($id) && $id) {
+        update_option('keiba_ai_digest_verification_page_id', (int) $id, false);
+        return (int) $id;
+    }
+    return 0;
+}
+
+add_shortcode('keiba_ai_verification', function () {
+    $report = get_option('keiba_ai_digest_verification_report', null);
+    if (!is_array($report) || empty($report['models'])) {
+        return '<p>検証結果はまだありません。レース終了後の自動検証が行われると表示されます。</p>';
+    }
+    wp_enqueue_style(
+        'keiba-ai-digest',
+        plugins_url('assets/keiba-ai-digest.css', __FILE__),
+        array(),
+        KEIBA_AI_DIGEST_VERSION
+    );
+    return keiba_ai_digest_render_verification($report);
+});
+
+function keiba_ai_digest_rate($count, $hits)
+{
+    return $count > 0 ? number_format($hits / $count * 100, 1) . '%' : '-';
+}
+
+/** 母数が少ない行は、率だけで判断しないよう「参考」と添える。 */
+function keiba_ai_digest_hit_cells($row)
+{
+    $n = (int) ($row['count'] ?? 0);
+    $note = ($n > 0 && $n < 30) ? '<small>（参考）</small>' : '';
+    return '<td>' . esc_html($n) . $note . '</td>'
+        . '<td>' . esc_html(keiba_ai_digest_rate($n, (int) ($row['wins'] ?? 0))) . '</td>'
+        . '<td>' . esc_html(keiba_ai_digest_rate($n, (int) ($row['top3'] ?? 0))) . '</td>';
+}
+
+function keiba_ai_digest_hit_table($title, $rows, $label_key = 'label', $label_header = '区分')
+{
+    if (empty($rows)) {
+        return '';
+    }
+    $html = '<h4>' . esc_html($title) . '</h4><div class="keiba-table-scroll"><table class="keiba-ai-digest-table">';
+    $html .= '<thead><tr><th>' . esc_html($label_header) . '</th><th>対象数</th><th>勝率</th><th>複勝率</th></tr></thead><tbody>';
+    foreach ($rows as $row) {
+        $html .= '<tr><td>' . esc_html($row[$label_key] ?? '-') . '</td>' . keiba_ai_digest_hit_cells($row) . '</tr>';
+    }
+    return $html . '</tbody></table></div>';
+}
+
+function keiba_ai_digest_render_verification($report)
+{
+    $updated = get_option('keiba_ai_digest_verification_at', '');
+    $html = '<div class="keiba-ai-digest keiba-ai-digest-verification">';
+    $html .= '<p class="keiba-ai-digest-disclaimer">AI指数の過去の成績を、的中・不的中を問わず全件、母数付きで公開しています。'
+        . '予測は公開した時点のAI指数のまま記録しており、後から書き換えていません。'
+        . '同じ予測が更新で再生成されても、最初に公開した1件だけを集計しています。'
+        . 'モデルやロジックを変更した場合は、旧モデルと新モデルを分けて集計します。'
+        . '過去の成績は将来の結果や利益を保証するものではありません。</p>';
+    if ($updated) {
+        $html .= '<p class="keiba-ai-digest-updated">最終更新: ' . esc_html(keiba_ai_digest_format_time($updated)) . '</p>';
+    }
+
+    foreach ($report['models'] as $model) {
+        $html .= '<section class="keiba-ai-digest-section">';
+        $html .= '<h2>モデル: ' . esc_html($model['modelVersion'] ?? '-') . '</h2>';
+        $html .= '<ul class="keiba-ai-digest-trend-list">'
+            . '<li>集計期間: ' . esc_html($model['periodFrom'] ?? '-') . ' 〜 ' . esc_html($model['periodTo'] ?? '-') . '</li>'
+            . '<li>対象レース数: ' . esc_html($model['races'] ?? 0) . '</li>'
+            . '<li>検証した予測数: ' . esc_html($model['predictions'] ?? 0) . '</li>'
+            . '</ul>';
+
+        $summary = array();
+        if (!empty($model['top5']['count'])) {
+            $summary[] = array('label' => 'AI指数TOP5（全頭）') + $model['top5'];
+        }
+        if (!empty($model['top1']['count'])) {
+            $summary[] = array('label' => '1位指数馬（開催場・日ごとのTOP5で最上位）') + $model['top1'];
+        }
+        $html .= keiba_ai_digest_hit_table('AI指数TOP5の成績', $summary, 'label', '対象');
+        $html .= keiba_ai_digest_hit_table('カテゴリ別', $model['categories'] ?? array(), 'label', 'カテゴリ');
+        if (!empty($model['categories'])) {
+            $html .= '<p><small>危険な人気馬は、複勝率が低いほど注意の指摘が妥当だったことを表します。</small></p>';
+        }
+
+        $bands = array();
+        foreach (($model['bands'] ?? array()) as $band) {
+            $bands[] = array('label' => ($band['low'] ?? 0) . '〜' . ($band['high'] ?? 0) . '点') + $band;
+        }
+        $html .= keiba_ai_digest_hit_table('指数帯別の成績（AI指数TOP5）', $bands, 'label', '指数帯');
+        $html .= keiba_ai_digest_hit_table('中央競馬・地方競馬別（AI指数TOP5）', $model['byLeague'] ?? array(), 'label', '区分');
+        $html .= keiba_ai_digest_hit_table('競馬場別（AI指数TOP5）', $model['byVenue'] ?? array(), 'label', '競馬場');
+        $html .= keiba_ai_digest_hit_table('芝・ダート別（AI指数TOP5）', $model['bySurface'] ?? array(), 'label', '馬場');
+        $html .= '</section>';
+    }
+
+    return $html . '</div>';
 }
