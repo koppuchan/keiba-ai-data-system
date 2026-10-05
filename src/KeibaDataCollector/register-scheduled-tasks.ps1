@@ -13,6 +13,7 @@
       KeibaAiDataSystem-Content                : 毎日 -ContentTime            から繰り返し scheduled-content.bat（発走前〜レース間）
       KeibaAiDataSystem-TrendFinal            : 毎日 -TrendFinalTime          に scheduled-trend.bat final（開催終了後）
       KeibaAiDataSystem-Verify                : 毎日 -VerifyTime              に scheduled-verify.bat（開催終了後）
+      KeibaAiDataSystem-HealthCheck           : 毎日 -HealthCheckTime         から15分ごとに scheduled-healthcheck.bat（更新停止の検知・通知）
       KeibaAiDataSystem-Backup                : 毎日 -BackupTime              に scheduled-backup.bat（深夜、DBバックアップ）
       KeibaAiDataSystem-Dashboard             : 毎日 -DashboardTime           から繰り返し scheduled-dashboard.bat（日中）
 
@@ -79,6 +80,7 @@ param(
     [string] $VerifyTime = '22:00',
     [string] $DashboardTime = '07:00',
     [string] $BackupTime = '01:30',
+    [string] $HealthCheckTime = '08:30',
     [switch] $RunOnlyWhenLoggedOn = $true
 )
 
@@ -95,11 +97,12 @@ $contentBat = Join-Path $scriptDir 'scheduled-content.bat'
 $verifyBat = Join-Path $scriptDir 'scheduled-verify.bat'
 $dashboardBat = Join-Path $scriptDir 'scheduled-dashboard.bat'
 $backupBat = Join-Path $scriptDir 'scheduled-backup.bat'
+$healthBat = Join-Path $scriptDir 'scheduled-healthcheck.bat'
 $exePath = Join-Path $scriptDir 'bin\Debug\net48\KeibaDataCollector.exe'
 $secrets = Join-Path $scriptDir 'secrets.local.bat'
 
 # --- 事前チェック ------------------------------------------------------------
-foreach ($required in @($backfillBat, $scoreBat, $trendBat, $contentBat, $verifyBat, $dashboardBat, $backupBat, $exePath)) {
+foreach ($required in @($backfillBat, $scoreBat, $trendBat, $contentBat, $verifyBat, $dashboardBat, $backupBat, $healthBat, $exePath)) {
     if (-not (Test-Path $required)) {
         throw "必要なファイルが見つかりません: $required`nビルド済みか確認してください（dotnet build -c Debug）。"
     }
@@ -235,6 +238,10 @@ Register-KeibaTask -TaskName "$TaskPrefix-Dashboard" -BatPath $dashboardBat -Sta
 
 Register-KeibaTask -TaskName "$TaskPrefix-Backup" -BatPath $backupBat -StartTime $BackupTime `
     -Description '深夜: historical.sqlite3のバックアップを作成する（直近14世代を保持）'
+
+Register-KeibaTask -TaskName "$TaskPrefix-HealthCheck" -BatPath $healthBat -StartTime $HealthCheckTime `
+    -Description '日中: AI指数算出・WordPress公開が60分以上止まっていないか確認し、止まっていればメール通知する（繰り返し）' `
+    -RepeatEvery (New-TimeSpan -Minutes 15) -RepeatFor (New-TimeSpan -Hours 14)
 
 # 登録し直したことで停止したタスクを再開する。
 # ここを忘れると、日中に更新した日はその後のレースが反映されないまま終わる。

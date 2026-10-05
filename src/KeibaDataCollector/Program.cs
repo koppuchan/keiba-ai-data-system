@@ -70,6 +70,32 @@ namespace KeibaDataCollector
                 }
                 return;
             }
+            if (mode == "notifytest")
+            {
+                var error = NotifierService.SendTestMail();
+                Console.WriteLine(error == null
+                    ? "[notifytest] テストメールを送信しました。宛先に届いているか確認してください。"
+                    : $"[notifytest] 送信に失敗しました: {error}");
+                if (error != null) _hadFailure = true;
+                return;
+            }
+            if (mode == "healthcheck")
+            {
+                try
+                {
+                    using (var historical = new HistoricalDataStore(AppConfig.HistoricalDbPath))
+                    using (var auditLog = new AuditLogStore(historical.Connection))
+                    {
+                        new HealthCheckService(historical.Connection, auditLog, new NotifierService(auditLog))
+                            .Run(DateTime.Now);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    LogFailure("healthcheck", "更新停止の確認に失敗", ex);
+                }
+                return;
+            }
             if (mode == "backup")
             {
                 try
@@ -371,7 +397,7 @@ namespace KeibaDataCollector
 
         private static void PrintUsage()
         {
-            Console.WriteLine("使い方: KeibaDataCollector.exe [setup|morning|predict|score|watch|probe|backfill|dbstats|trend|content|verify|backup|licensegate|weights|stats|dashboard]");
+            Console.WriteLine("使い方: KeibaDataCollector.exe [setup|morning|predict|score|watch|probe|backfill|dbstats|trend|content|verify|backup|healthcheck|notifytest|licensegate|weights|stats|dashboard]");
             Console.WriteLine("  setup       : 初回のみ。利用キー等をGUIダイアログで設定する。");
             Console.WriteLine("  morning     : 朝一バッチ。当日の出走表を取得しWordPressへ反映する。");
             Console.WriteLine("  predict     : 朝一オッズの人気順から予想印を生成しWordPressへ反映する。");
@@ -397,6 +423,9 @@ namespace KeibaDataCollector
             Console.WriteLine("              content [yyyy-MM-dd]");
             Console.WriteLine("  verify      : predictionsを確定着順と突き合わせてverificationへ記録する。");
             Console.WriteLine("              verify [yyyy-MM-dd]");
+            Console.WriteLine("  healthcheck : 開催日の日中に、AI指数算出・WordPress公開が60分以上止まっていないか確認し、");
+            Console.WriteLine("              止まっていればメール通知する（COMには接続しない）。");
+            Console.WriteLine("  notifytest  : SMTP設定でテストメールを1通送る。");
             Console.WriteLine("  backup      : historical.sqlite3のバックアップを作成する（直近14世代を保持）。");
             Console.WriteLine("  stats       : 指数帯別の3着内率・勝率を表示する（要:事前のverify実行）。");
             Console.WriteLine("              stats <Nerai|Ana|Kiken|AiIndexTop5> <modelVersion>");
@@ -482,7 +511,7 @@ namespace KeibaDataCollector
             }
             catch (Exception ex)
             {
-                LogFailure(source.SourceName, "バックフィル初期化失敗（このソースをスキップ）", ex);
+                LogFailure(source.SourceName, "バックフィル初期化失敗（このソースをスキップ）", ex, critical: true);
                 return;
             }
 
@@ -507,7 +536,7 @@ namespace KeibaDataCollector
             }
             catch (Exception ex)
             {
-                LogFailure(sourceName, $"{stepName} バックフィル失敗（この種別のみスキップして続行）", ex);
+                LogFailure(sourceName, $"{stepName} バックフィル失敗（この種別のみスキップして続行）", ex, critical: true);
             }
             Console.WriteLine($"[{sourceName}] {stepName} バックフィル終了: {DateTime.Now:HH:mm:ss}");
         }
@@ -567,7 +596,7 @@ namespace KeibaDataCollector
             }
             catch (Exception ex)
             {
-                LogFailure(source.SourceName, "6ファクター算出に失敗（このソースのみスキップして続行）", ex);
+                LogFailure(source.SourceName, "6ファクター算出に失敗（このソースのみスキップして続行）", ex, critical: true);
             }
         }
 
@@ -679,7 +708,7 @@ namespace KeibaDataCollector
             }
             catch (Exception ex)
             {
-                LogFailure(source.SourceName, "本日の狙い馬・穴馬・危険な人気馬の生成・公開に失敗（このソースのみスキップして続行）", ex);
+                LogFailure(source.SourceName, "本日の狙い馬・穴馬・危険な人気馬の生成・公開に失敗（このソースのみスキップして続行）", ex, critical: true);
             }
         }
 

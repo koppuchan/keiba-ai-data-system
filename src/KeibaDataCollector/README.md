@@ -17,6 +17,8 @@ KeibaDataCollector.exe dbstats     # 蓄積済みSQLiteの件数・日付範囲�
 KeibaDataCollector.exe trend       # 本日の傾向（脚質・枠・馬場・上がり・通過順）を算出（ローカルのみ）
 KeibaDataCollector.exe content     # 狙い馬・穴馬・危険な人気馬を生成・検証・公開（新規keiba_digest投稿へ）
 KeibaDataCollector.exe verify      # predictionsを確定着順と突き合わせて検証（ローカルのみ）
+KeibaDataCollector.exe healthcheck  # 更新が止まっていないか確認し、止まっていればメール通知
+KeibaDataCollector.exe notifytest   # SMTP設定でテストメールを送信
 KeibaDataCollector.exe backup      # historical.sqlite3のバックアップを作成（直近14世代保持、data\backup\）
 KeibaDataCollector.exe stats       # 指数帯別の3着内率・勝率を表示
 KeibaDataCollector.exe licensegate # LicenseGateの確認・更新（下記）
@@ -114,6 +116,7 @@ powershell -ExecutionPolicy Bypass -File .\register-scheduled-tasks.ps1
 
 | タスク | 既定時刻 | 内容 |
 | --- | --- | --- |
+| `KeibaAiDataSystem-HealthCheck` | 08:30〜（15分毎/14時間） | 更新停止の検知・メール通知 |
 | `KeibaAiDataSystem-Backup` | 01:30（1回） | 深夜: DBのバックアップ（仕様書§12） |
 | `KeibaAiDataSystem-BackfillIncremental` | 02:00（1回） | 深夜: 履歴データの差分取得 |
 | `KeibaAiDataSystem-Morning` | 07:00（1回） | 早朝: 当日の出走表取得 |
@@ -305,7 +308,18 @@ KeibaDataCollector.exe stats AiIndexTop5 ai-index-v1
 | LicenseGate未承認 | 公開処理を強制停止 | `DigestPublisherService`/`ValidatorService`が対応済み |
 
 「通知」は`AuditLogStore`（`audit_logs`テーブル）への記録が必須部分。加えて`NotifierService`が
-severity=Criticalのものだけベストエフォートでメール送信する（SMTP未設定なら送信自体を行わない）。
+severity=Criticalのものだけメール送信する（SMTP未設定なら送信自体を行わない）。Criticalにしているのは
+データ取得（バックフィル）失敗、AI指数算出失敗、コンテンツ生成・WordPress公開失敗、起動失敗、
+および後述の更新停止。同じ原因のメールは60分以内に再送しない（20分おきのタスクが障害中に
+同じ内容を送り続けるのを防ぐため）。
+
+**メール設定**（`secrets.local.bat`に`SmtpHost`/`SmtpPort`/`SmtpUseSsl`/`SmtpUser`/`SmtpPassword`/
+`SmtpFrom`/`SmtpTo`。例は`secrets.local.bat.example`）。465番は接続と同時にTLS、587番はSTARTTLS。
+設定後は`KeibaDataCollector.exe notifytest`でテストメールを送って確認する。
+**更新停止の検知**: `KeibaAiDataSystem-HealthCheck`（08:30〜15分おき）が`healthcheck`を実行し、
+開催日の日中にAI指数算出またはWordPress公開が60分以上成功していなければ通知する
+（再通知は2時間おき）。一時的な失敗ではなく「止まった状態が続く」場合に気付くための仕組み。
+
 `Program.LogFailure`はすべてのコマンドの例外処理が最終的に通る1箇所のため、ここに集約することで
 各コマンドを個別に手直しせず横断的にエラーを記録している。成功時も`LogSuccess`で`audit_logs`へ
 記録し、「エラーが無い」と「一度も実行されていない」を区別できるようにしている。

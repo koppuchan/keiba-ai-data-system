@@ -79,6 +79,23 @@ namespace KeibaDataCollector.Data
             return result;
         }
 
+        /// <summary>指定カテゴリで最後に「成功」（severity=Info）を記録した時刻（UTC）。無ければnull。
+        /// 更新停止の検知（healthcheck）と、通知メールの送り過ぎ防止に使う。</summary>
+        public DateTime? LastInfoUtc(string category, string messageEquals = null)
+        {
+            var sql = "SELECT MAX(occurred_at_utc) FROM audit_logs WHERE severity='Info' AND category=@category";
+            if (messageEquals != null) sql += " AND message=@message";
+            using (var cmd = new SQLiteCommand(sql + ";", _conn))
+            {
+                cmd.Parameters.AddWithValue("@category", category);
+                if (messageEquals != null) cmd.Parameters.AddWithValue("@message", messageEquals);
+                var result = cmd.ExecuteScalar();
+                return result != null && result != DBNull.Value
+                    ? DateTime.Parse((string)result, null, System.Globalization.DateTimeStyles.RoundtripKind).ToUniversalTime()
+                    : (DateTime?)null;
+            }
+        }
+
         /// <summary>直近N件（新しい順）。監視ダッシュボードでの最終確認・トラブルシュート用。</summary>
         public List<(DateTime OccurredAtUtc, string Severity, string Source, string Category, string Message)> GetRecent(int limit)
         {
