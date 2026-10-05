@@ -17,6 +17,9 @@ namespace KeibaDataCollector
         // お客様からの指摘で初めて気づくことになる（keiba-race-result-auto-postingで実際に発生した）。
         private static bool _hadFailure;
 
+        // 他の処理がJV-Link/UmaConnを使用中のとき、順番を待つ最長時間（ComAccessLock参照）。
+        private static readonly TimeSpan ComLockWait = TimeSpan.FromMinutes(10);
+
         // COM(ActiveX)相手はSTAスレッドが前提のため必須。
         [STAThread]
         private static int Main(string[] args)
@@ -25,8 +28,21 @@ namespace KeibaDataCollector
             // probe のみ第2引数でレースキーを受け取る（例: probe 20260811-46-1R）。
             var arg = args.Length > 1 ? args[1] : null;
 
+            ComAccessLock comLock = null;
             try
             {
+                if (ComAccessLock.IsComMode(mode))
+                {
+                    comLock = ComAccessLock.TryAcquire(ComLockWait);
+                    if (comLock == null)
+                    {
+                        // 他の処理が長引いているだけで異常ではない。次回の実行で処理される
+                        // （止まったままなら更新停止の監視が知らせる）。
+                        Console.WriteLine($"[{mode}] 他の処理がJV-Link/UmaConnを使用中のため、今回は見送ります（{ComLockWait.TotalMinutes:0}分待ちました）。");
+                        return 0;
+                    }
+                }
+
                 Run(mode, arg, args);
             }
             catch (Exception ex)
@@ -35,6 +51,10 @@ namespace KeibaDataCollector
                 // 未処理例外のまま落とすと、サーバーではWindowsのエラー報告ダイアログが
                 // 出てタスクが終了しなくなる恐れがあるため、必ず捕まえて終了コードで返す。
                 LogFailure("起動", "処理を開始できませんでした", ex, critical: true);
+            }
+            finally
+            {
+                comLock?.Dispose();
             }
 
             if (_hadFailure)
