@@ -96,6 +96,20 @@ namespace KeibaDataCollector.Data
             }
         }
 
+        /// <summary>指定した送信元・重大度の記録が、sinceUtc以降に何件あるか。
+        /// 一時的な失敗か、続いている失敗かの判別に使う。</summary>
+        public int CountSince(string source, string severity, DateTime sinceUtc)
+        {
+            using (var cmd = new SQLiteCommand(
+                "SELECT COUNT(*) FROM audit_logs WHERE source=@source AND severity=@severity AND occurred_at_utc >= @since;", _conn))
+            {
+                cmd.Parameters.AddWithValue("@source", source);
+                cmd.Parameters.AddWithValue("@severity", severity);
+                cmd.Parameters.AddWithValue("@since", sinceUtc.ToString("o"));
+                return Convert.ToInt32(cmd.ExecuteScalar());
+            }
+        }
+
         /// <summary>直近N件（新しい順）。監視ダッシュボードでの最終確認・トラブルシュート用。</summary>
         public List<(DateTime OccurredAtUtc, string Severity, string Source, string Category, string Message)> GetRecent(int limit)
         {

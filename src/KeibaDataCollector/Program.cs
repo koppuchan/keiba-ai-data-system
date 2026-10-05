@@ -448,7 +448,7 @@ namespace KeibaDataCollector
 
         /// <summary>例外の内容をログに残す。原因調査には型と発生箇所が要るため、
         /// Messageだけでなく例外の全文（スタックトレース含む）を出す。</summary>
-        private static void LogFailure(string sourceName, string what, Exception ex, bool critical = false)
+        private static void LogFailure(string sourceName, string what, Exception ex, bool critical = false, bool persistent = false)
         {
             _hadFailure = true;
             var summary = $"{what}: {ex.GetType().Name}: {ex.Message}";
@@ -468,7 +468,7 @@ namespace KeibaDataCollector
                     var notifier = new NotifierService(audit);
                     notifier.Notify(
                         critical ? NotifierService.SeverityCritical : NotifierService.SeverityError,
-                        sourceName, "エラー", summary);
+                        sourceName, "エラー", summary, requireRepeat: persistent);
                 }
             }
             catch (Exception auditEx)
@@ -522,7 +522,7 @@ namespace KeibaDataCollector
             }
             catch (Exception ex)
             {
-                LogFailure(source.SourceName, "バックフィル初期化失敗（このソースをスキップ）", ex, critical: true);
+                LogFailure(source.SourceName, "バックフィル初期化失敗（このソースをスキップ）", ex, critical: true, persistent: true);
                 return;
             }
 
@@ -547,7 +547,7 @@ namespace KeibaDataCollector
             }
             catch (Exception ex)
             {
-                LogFailure(sourceName, $"{stepName} バックフィル失敗（この種別のみスキップして続行）", ex, critical: true);
+                LogFailure(sourceName, $"{stepName} バックフィル失敗（この種別のみスキップして続行）", ex, critical: true, persistent: true);
             }
             Console.WriteLine($"[{sourceName}] {stepName} バックフィル終了: {DateTime.Now:HH:mm:ss}");
         }
@@ -607,7 +607,7 @@ namespace KeibaDataCollector
             }
             catch (Exception ex)
             {
-                LogFailure(source.SourceName, "6ファクター算出に失敗（このソースのみスキップして続行）", ex, critical: true);
+                LogFailure(source.SourceName, "6ファクター算出に失敗（このソースのみスキップして続行）", ex, critical: true, persistent: true);
             }
         }
 
@@ -719,7 +719,7 @@ namespace KeibaDataCollector
             }
             catch (Exception ex)
             {
-                LogFailure(source.SourceName, "本日の狙い馬・穴馬・危険な人気馬の生成・公開に失敗（このソースのみスキップして続行）", ex, critical: true);
+                LogFailure(source.SourceName, "本日の狙い馬・穴馬・危険な人気馬の生成・公開に失敗（このソースのみスキップして続行）", ex, critical: true, persistent: true);
             }
         }
 
