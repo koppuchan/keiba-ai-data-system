@@ -4,14 +4,14 @@
  * Description: KeibaDataCollector（JRAVAN+競馬最強の法則WEB 全自動AI競馬データシステム）から送られる
  *              AI指数TOP5・本日の傾向・狙い馬/穴馬/危険な人気馬を、開催場・日単位のカスタム投稿タイプ
  *              「keiba_digest」として受け取り、表示する。既存の Keiba Race Sync（race投稿）とは別。
- * Version: 0.5.0
+ * Version: 0.5.1
  */
 
 if (!defined('ABSPATH')) {
     exit;
 }
 
-define('KEIBA_AI_DIGEST_VERSION', '0.5.0');
+define('KEIBA_AI_DIGEST_VERSION', '0.5.1');
 define('KEIBA_AI_DIGEST_JSON_META_KEYS', array(
     'ai_index_top5',
     'trend_morning',
@@ -684,6 +684,10 @@ function keiba_ai_digest_render_verification($report)
     foreach ($report['models'] as $model) {
         $html .= '<section class="keiba-ai-digest-section">';
         $html .= '<h2>モデル: ' . esc_html($model['modelVersion'] ?? '-') . '</h2>';
+        if ((int) ($model['predictions'] ?? 0) < 100) {
+            $html .= '<p class="keiba-ai-digest-notice">集計を始めたばかりで検証した予測数が少ないため、'
+                . '下の割合は偶然の影響を大きく受けます。数が増えるまでは参考程度にご覧ください。</p>';
+        }
         $html .= '<ul class="keiba-ai-digest-trend-list">'
             . '<li>集計期間: ' . esc_html($model['periodFrom'] ?? '-') . ' 〜 ' . esc_html($model['periodTo'] ?? '-') . '</li>'
             . '<li>対象レース数: ' . esc_html($model['races'] ?? 0) . '</li>'
