@@ -4,14 +4,14 @@
  * Description: KeibaDataCollector（JRAVAN+競馬最強の法則WEB 全自動AI競馬データシステム）から送られる
  *              AI指数TOP5・本日の傾向・狙い馬/穴馬/危険な人気馬を、開催場・日単位のカスタム投稿タイプ
  *              「keiba_digest」として受け取り、表示する。既存の Keiba Race Sync（race投稿）とは別。
- * Version: 0.3.0
+ * Version: 0.4.0
  */
 
 if (!defined('ABSPATH')) {
     exit;
 }
 
-define('KEIBA_AI_DIGEST_VERSION', '0.3.0');
+define('KEIBA_AI_DIGEST_VERSION', '0.4.0');
 define('KEIBA_AI_DIGEST_JSON_META_KEYS', array(
     'ai_index_top5',
     'trend_morning',
@@ -390,6 +390,13 @@ function keiba_ai_digest_render_digest($post_id)
         . 'AI指数・傾向・狙い目は過去データおよび当日データの統計的な分析結果であり、'
         . 'レースの結果や利益を保証するものではありません。'
         . '</p>';
+
+    // ばんえい競馬（場コード83）は専用の指標が未対応のため、平地競馬と同じ指標で算出した参考値である旨を示す。
+    if (get_post_meta($post_id, 'track_code', true) === '83') {
+        echo '<p class="keiba-ai-digest-notice">'
+            . 'ばんえい競馬は専用指標未対応のため、AI指数・傾向・狙い目は参考値です。'
+            . '</p>';
+    }
 
     if ($updated_at) {
         echo '<p class="keiba-ai-digest-updated">最終更新: ' . esc_html(keiba_ai_digest_format_time($updated_at)) . '</p>';

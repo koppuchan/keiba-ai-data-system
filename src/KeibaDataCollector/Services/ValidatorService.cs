@@ -68,7 +68,7 @@ namespace KeibaDataCollector.Services
                 AiIndexSnapshot = pick.AiIndexAtGeneration,
                 NinkiSnapshot = pick.NinkiAtGeneration,
                 TanshoOddsSnapshot = pick.TanshoOddsAtGeneration,
-                ModelVersion = AiIndexService.ModelVersion,
+                ModelVersion = AiIndexService.ModelVersionFor(pick.Race.TrackCode),
                 LicenseCheckPassed = licenseOk,
                 ValidatorPassed = passed,
                 ValidatorNotes = notes.Count > 0 ? string.Join(" / ", notes) : null,

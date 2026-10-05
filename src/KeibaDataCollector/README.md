@@ -168,6 +168,11 @@ KeibaDataCollector.exe licensegate check 35 local
 - 取消・除外馬（SEレコードの異常区分コード≠0）はAI指数TOP5から自動的に除外される
 - AI指数TOP5は開催場（開催日×競馬場）全体で上位5頭。同点はデータ充足率→馬番の順でタイブレーク
 
+- 競技種別ごとにモデルを分けられる構造にしている: ばんえい競馬（場コード83）は重みのsegmentが
+  `banei`（`weights set banei ...`で平地とは別に設定可能）、モデルバージョンが`ai-index-v1-banei`となり、
+  検証（`stats`・サイト上の検証ページ）でも平地と混ざらない。専用の指標・重みが用意できるまでは
+  既定の重みで算出した参考値で、公開ページにもその旨の注記を表示する
+
 ```
 KeibaDataCollector.exe weights show central:turf
 KeibaDataCollector.exe weights set central:turf 1.2 1.0 1.0 1.5 0.8 1.0

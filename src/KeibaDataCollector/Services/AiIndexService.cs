@@ -20,6 +20,19 @@ namespace KeibaDataCollector.Services
         /// Verification DBで指数帯別成績をこの値ごとに分離するための識別子。</summary>
         public const string ModelVersion = "ai-index-v1";
 
+        /// <summary>ばんえい競馬（帯広、場コード83）。平地競馬とは競技が異なるため、重みの設定
+        /// （segment "banei"）とモデルバージョン（検証の集計）を平地とは別に持てるようにしている。
+        /// 専用の指標・重みが用意できるまでは、既定の重みで算出した参考値として扱う。</summary>
+        public const string BaneiTrackCode = "83";
+
+        public static bool IsBanei(string trackCode) => trackCode == BaneiTrackCode;
+
+        /// <summary>競技種別ごとのモデルバージョン。平地は<see cref="ModelVersion"/>のまま、ばんえいは
+        /// 別バージョンにして、Verification DBの指数帯別成績が混ざらないようにする
+        /// （お客様要望: 競技種別ごとにモデルを分けて検証できること）。</summary>
+        public static string ModelVersionFor(string trackCode) =>
+            IsBanei(trackCode) ? ModelVersion + "-banei" : ModelVersion;
+
         /// <summary>特徴量抽出ロジック（FactorScoringServiceの各Compute*メソッド）を変えたら上げる。
         /// モデル式は同じでも特徴量の算出方法が変われば別バージョンとして扱う。</summary>
         public const string FeatureVersion = "features-v2";
@@ -36,6 +49,12 @@ namespace KeibaDataCollector.Services
         /// <summary>セグメントキーを組み立てる。仕様書§8「重みはDB設定値にし、中央/地方・芝/ダート等で
         /// 別設定可能にする」に対応。トラックコードが芝/ダートのどちらか判別できない場合（地方の特殊な
         /// トラック種別等）は surface 部分を省略し、"central"/"local" 単位の設定にフォールバックする。</summary>
+        public static string BuildSegment(bool isCentral, string trackCode, string trackSurfaceCode)
+        {
+            if (IsBanei(trackCode)) return "banei";
+            return BuildSegment(isCentral, trackSurfaceCode);
+        }
+
         public static string BuildSegment(bool isCentral, string trackSurfaceCode)
         {
             var venuePart = isCentral ? "central" : "local";
@@ -63,7 +82,7 @@ namespace KeibaDataCollector.Services
             int umaban, bool isCentral, DateTime dataCutoffUtc)
         {
             var factors = _scoring.Compute(input);
-            var segment = BuildSegment(isCentral, input.TrackSurfaceCode);
+            var segment = BuildSegment(isCentral, input.TrackCode, input.TrackSurfaceCode);
             var weights = _scores.GetWeights(segment);
 
             var (index, completeness) = Combine(factors, weights);
@@ -82,7 +101,7 @@ namespace KeibaDataCollector.Services
                 AiIndex = index,
                 DataCompleteness = completeness,
                 IsScratched = IsScratchedCode(input.IJyoCd),
-                ModelVersion = ModelVersion,
+                ModelVersion = ModelVersionFor(input.TrackCode),
                 FeatureVersion = FeatureVersion,
                 DataCutoffUtc = dataCutoffUtc,
                 ComputedAtUtc = DateTime.UtcNow,
