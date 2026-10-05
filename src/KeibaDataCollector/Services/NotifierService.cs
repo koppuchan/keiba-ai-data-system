@@ -35,14 +35,33 @@ namespace KeibaDataCollector.Services
             _auditLog = auditLog;
         }
 
+        // 「続いている失敗」とみなす回数と期間（20分おきのタスクで、約1時間続いた場合）。
+        private const int RepeatedFailureCount = 3;
+        private static readonly TimeSpan RepeatedFailureWindow = TimeSpan.FromMinutes(60);
+
+        /// <param name="requireRepeat">trueなら、同じ送信元のCriticalが直近60分に3回以上続いた場合だけ
+        /// メールを送る。JRA-VANのサーバー側の一時的なエラー（-413等）1回で、お客様へメールを
+        /// 送らないため。起動失敗・WordPress公開失敗などは1回でも送る（falseのまま）。</param>
         public void Notify(string severity, string source, string category, string message,
-            TimeSpan? suppressWindow = null)
+            TimeSpan? suppressWindow = null, bool requireRepeat = false)
         {
             _auditLog.Log(severity, source, category, message);
             Console.WriteLine($"[{severity}] [{source}] [{category}] {message}");
 
-            if (severity == SeverityCritical)
-                TrySendEmail(source, category, message, suppressWindow ?? DefaultSuppressWindow);
+            if (severity != SeverityCritical) return;
+
+            if (requireRepeat)
+            {
+                var recent = _auditLog.CountSince(source, SeverityCritical, DateTime.UtcNow - RepeatedFailureWindow);
+                if (recent < RepeatedFailureCount)
+                {
+                    Console.WriteLine(
+                        $"[NotifierService] 一時的な失敗の可能性があるため、メールは見送りました（直近60分で{recent}回目。{RepeatedFailureCount}回続くと通知）。");
+                    return;
+                }
+            }
+
+            TrySendEmail(source, category, message, suppressWindow ?? DefaultSuppressWindow);
         }
 
         /// <summary>SMTP設定の確認用。設定を使って1通送り、失敗した理由を返す（成功ならnull）。</summary>

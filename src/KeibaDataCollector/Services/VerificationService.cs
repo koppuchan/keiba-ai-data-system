@@ -43,6 +43,14 @@ namespace KeibaDataCollector.Services
                 .Where(p => p.ValidatorPassed) // 非公開だったものは検証対象にしない。
                 .ToList();
 
+            // 蓄積データ(RACE)の確定着順は、日中はまだ入っていないことがある（実機: 地方で当日16時時点は
+            // 全件未確定）。結果がまだ取れていないレースは、レース単位の速報（0B12）から補う。
+            var pendingRaces = predictions
+                .Where(p => !alreadyVerified.Contains(p.PredictionId) && !results.ContainsKey((p.RaceNumber, p.Umaban)))
+                .Select(p => p.RaceNumber).Distinct().ToList();
+            if (pendingRaces.Count > 0)
+                ReadConfirmedResultsRealtime(raceDate, trackCode, pendingRaces, results, surfaceByRace);
+
             int verified = 0, pending = 0;
             foreach (var p in predictions)
             {
@@ -78,6 +86,67 @@ namespace KeibaDataCollector.Services
                 Verified = verified,
                 StillPending = pending,
             };
+        }
+
+        /// <summary>レース単位の速報（0B12）から確定着順を読み、resultsへ足す。着順が段階的に届く
+        /// （3着まで→全馬着順→…）ため、全馬着順まで揃った（データ区分6以降）レースだけを使う。
+        /// 3着までしか分からない時点で4着以下の馬を「3着内ではない」と決めつけないため。</summary>
+        private void ReadConfirmedResultsRealtime(DateTime raceDate, string trackCode, IEnumerable<int> raceNumbers,
+            Dictionary<(int RaceNumber, int Umaban), int> results, Dictionary<int, string> surfaceByRace)
+        {
+            foreach (var raceNumber in raceNumbers)
+            {
+                var key = new RaceKey { TrackCode = trackCode, RaceDate = raceDate, RaceNumber = raceNumber }.AsJvRealtimeKey();
+                int rc = _source.OpenRealtime("0B12", key);
+                if (rc == -1) { _source.Close(); continue; } // まだ確定していない。
+                if (rc != 0)
+                {
+                    _source.Close();
+                    throw new InvalidOperationException($"{_source.SourceName} OpenRealtime(0B12) failed: {rc}");
+                }
+
+                var finishers = new List<(int Umaban, int Chakujun)>();
+                string surface = null;
+                var complete = false;
+                try
+                {
+                    while (true)
+                    {
+                        int size = _source.Read(out var buffer, out _);
+                        if (size == 0) break;
+                        if (size == -1) continue;
+                        if (size == -3) { System.Threading.Thread.Sleep(500); continue; }
+                        if (size < 0)
+                            throw new InvalidOperationException($"{_source.SourceName} Read failed: {size}");
+
+                        var typeId = JvRecordParser.GetRecordTypeId(buffer);
+                        var dataKubun = JvRecordParser.GetDataKubun(buffer);
+                        if (typeId == "SE")
+                        {
+                            var (_, entry) = JvRecordParser.ParseRaceResult(buffer);
+                            finishers.RemoveAll(f => f.Umaban == entry.Umaban);
+                            if (entry.Umaban > 0 && entry.Chakujun > 0) finishers.Add((entry.Umaban, entry.Chakujun));
+                            if (dataKubun == "6" || dataKubun == "7") complete = true;
+                        }
+                        else if (typeId == "RA")
+                        {
+                            var ra = new JV_RA_RACE();
+                            ra.SetDataB(ref buffer);
+                            var trackSurface = Trim(ra.TrackCD);
+                            if (trackSurface.Length > 0) surface = trackSurface;
+                            if (dataKubun == "6" || dataKubun == "7") complete = true;
+                        }
+                    }
+                }
+                finally
+                {
+                    _source.Close();
+                }
+
+                if (!complete) continue;
+                foreach (var f in finishers) results[(raceNumber, f.Umaban)] = f.Chakujun;
+                if (surface != null) surfaceByRace[raceNumber] = surface;
+            }
         }
 
         /// <summary>(race_number, umaban) -> 確定着順（chakujun>0＝確定済みの行のみ）と、
