@@ -1,3 +1,4 @@
+using System;
 using System.Data.SQLite;
 using System.IO;
 
@@ -22,19 +23,33 @@ namespace KeibaDataCollector.Data
             if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
                 Directory.CreateDirectory(dir);
 
-            var conn = new SQLiteConnection($"Data Source={dbPath};Version=3;");
+            // 待ち時間は接続の確立時点から効かせる。以前はPRAGMA journal_mode=WALを先に実行して
+            // いたため、複数のタスクが同時に起動した瞬間に他方がDBを掴んでいると、待たずに即
+            // "database is locked" となり、起動自体が失敗した（実機: deploy直後に4タスクが同時起動）。
+            var conn = new SQLiteConnection($"Data Source={dbPath};Version=3;BusyTimeout=10000;");
             conn.Open();
 
-            // 1コマンドに複数PRAGMAをまとめると一部しか実行されない場合があるため、個別に実行する。
-            using (var cmd = conn.CreateCommand())
-            {
-                cmd.CommandText = "PRAGMA journal_mode=WAL;";
-                cmd.ExecuteNonQuery();
-            }
             using (var cmd = conn.CreateCommand())
             {
                 cmd.CommandText = "PRAGMA busy_timeout=10000;";
                 cmd.ExecuteNonQuery();
+            }
+
+            // WALはDBファイルに永続化される設定のため、すでにWALなら変更しない
+            // （変更しようとするだけで排他的なロックが必要になり、他のタスクと衝突しやすい）。
+            string mode;
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = "PRAGMA journal_mode;";
+                mode = Convert.ToString(cmd.ExecuteScalar());
+            }
+            if (!string.Equals(mode, "wal", StringComparison.OrdinalIgnoreCase))
+            {
+                using (var cmd = conn.CreateCommand())
+                {
+                    cmd.CommandText = "PRAGMA journal_mode=WAL;";
+                    cmd.ExecuteNonQuery();
+                }
             }
 
             return conn;
