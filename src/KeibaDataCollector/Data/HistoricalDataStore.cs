@@ -293,8 +293,8 @@ namespace KeibaDataCollector.Data
                 INSERT INTO pedigree_links (ketto_num, sire_hansyoku_num, broodmare_sire_hansyoku_num)
                 VALUES (@ketto_num, @sire, @bms)
                 ON CONFLICT(ketto_num) DO UPDATE SET
-                    sire_hansyoku_num=excluded.sire_hansyoku_num,
-                    broodmare_sire_hansyoku_num=excluded.broodmare_sire_hansyoku_num;
+                    sire_hansyoku_num=COALESCE(excluded.sire_hansyoku_num, pedigree_links.sire_hansyoku_num),
+                    broodmare_sire_hansyoku_num=COALESCE(excluded.broodmare_sire_hansyoku_num, pedigree_links.broodmare_sire_hansyoku_num);
             ",
                 p => {
                     p.AddWithValue("@ketto_num", e.KettoNum);

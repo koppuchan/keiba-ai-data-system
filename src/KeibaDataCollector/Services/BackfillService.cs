@@ -373,7 +373,10 @@ namespace KeibaDataCollector.Services
             // 中央競馬の血統適性(⑤)が全馬nullになっていた。競走馬マスタ(UM、DIFN)は
             // 3代血統を馬ごとに持つため、これで出走馬全体を補う。地方(UmaConn)のDIFNは
             // UMではなく別形式(NU)を返し、その構造体定義がまだ無いため対象外。
-            if (_source.SourceName.Contains("中央"))
+            // 地方(UmaConn)のDIFNは競走馬マスタが"NU"で返る（レイアウトはUMと同じ位置に3代血統）。
+            // ただしoption=Normalだと同じNUを日次差分として約86万件も再送してくる（Setupは約12万件）ため、
+            // 無人の差分実行では読まず、全履歴(Setup)の手動実行時だけ取り込む。
+            if (_source.SourceName.Contains("中央") || _dataOption == DataOption.Setup)
                 BackfillPedigreeSpec("DIFN", PedigreeLegacyFromTime, isLegacyFormat: false);
         }
 
@@ -432,6 +435,14 @@ namespace KeibaDataCollector.Services
                     {
                         umCount++;
                         var link = JvFactorRecordParser.ParseHorseMasterPedigree(buffer);
+                        if (!string.IsNullOrEmpty(link.KettoNum) &&
+                            (!string.IsNullOrEmpty(link.SireHansyokuNum) || !string.IsNullOrEmpty(link.BroodmareSireHansyokuNum)))
+                            _store.UpsertPedigreeLink(link);
+                    }
+                    else if (typeId == "NU" && dataSpec == "DIFN")
+                    {
+                        umCount++;
+                        var link = JvFactorRecordParser.ParseLocalHorseMasterPedigree(buffer);
                         if (!string.IsNullOrEmpty(link.KettoNum) &&
                             (!string.IsNullOrEmpty(link.SireHansyokuNum) || !string.IsNullOrEmpty(link.BroodmareSireHansyokuNum)))
                             _store.UpsertPedigreeLink(link);
