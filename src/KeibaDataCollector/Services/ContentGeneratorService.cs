@@ -13,7 +13,7 @@ namespace KeibaDataCollector.Services
     ///
     /// AIに数値や馬番を自由生成させない（仕様書§14）方針のため、この段階では自然文生成AIを
     /// 呼ばない。DBの実数値だけを埋め込んだ固定テンプレートで文章を組み立てる
-    /// （テンプレートに断定表現を入れないことをGuardAgainstAbsoluteWordingで機械的にも担保する）。
+    /// （テンプレートに断定表現を入れないことをFindBannedWordで機械的にも担保する）。
     ///
     /// 判定に使う指数はScoresStore（scoreコマンドで既に永続化済み）から読むが、取消・除外状態は
     /// scoreコマンド実行時点のスナップショットの可能性があるため、このサービス自身が実行時に
@@ -68,10 +68,22 @@ namespace KeibaDataCollector.Services
                 picks.AddRange(PickKiken(raceKey, candidates));
             }
 
+            // 禁止表現を含む1件のために、同じ開催場・同じ実行の他の全件（他の開催場も含む）が
+            // 公開されなくなるのを避け、該当の1件だけ除外して続ける（実機: 全6項目が算出できた
+            // 馬の「データ充足率100%」が禁止表現「100%」に当たり、地方の全開催場が止まった）。
+            var safePicks = new List<GeneratedPick>();
             foreach (var pick in picks)
-                GuardAgainstAbsoluteWording(pick.Text);
+            {
+                var banned = FindBannedWord(pick.Text);
+                if (banned != null)
+                {
+                    Console.WriteLine($"[ContentGenerator] 禁止表現「{banned}」を含むためこの1件を除外: {pick.Text}");
+                    continue;
+                }
+                safePicks.Add(pick);
+            }
 
-            return picks;
+            return safePicks;
         }
 
         private List<PickCandidate> BuildCandidates(
@@ -129,8 +141,8 @@ namespace KeibaDataCollector.Services
             var topFactor = TopFactor(best.Factors);
             var horse = DisplayHorse(best);
             var text = topFactor == null
-                ? $"{race.RaceNumber}Rの狙い馬は{horse}。AI指数{best.AiIndex:0.0}（データ充足率{best.DataCompleteness:P0}）で当レース内トップ評価。"
-                : $"{race.RaceNumber}Rの狙い馬は{horse}。AI指数{best.AiIndex:0.0}（データ充足率{best.DataCompleteness:P0}）で当レース内トップ評価。{topFactor.Value.Name}が特に高評価（{topFactor.Value.Value:0.0}）。";
+                ? $"{race.RaceNumber}Rの狙い馬は{horse}。AI指数{best.AiIndex:0.0}（{CompletenessText(best.DataCompleteness)}）で当レース内トップ評価。"
+                : $"{race.RaceNumber}Rの狙い馬は{horse}。AI指数{best.AiIndex:0.0}（{CompletenessText(best.DataCompleteness)}）で当レース内トップ評価。{topFactor.Value.Name}が特に高評価（{topFactor.Value.Value:0.0}）。";
 
             return new GeneratedPick
             {
@@ -309,16 +321,21 @@ namespace KeibaDataCollector.Services
         }
 
         /// <summary>仕様書§11「絶対」「確実」等の断定表現を禁止、の機械的な最終防衛線。
-        /// テンプレート自体に含めていないため通常は発火しないが、将来のテンプレート追加・変更で
-        /// 混入した場合に公開前に気づけるようにする。</summary>
-        private static void GuardAgainstAbsoluteWording(string text)
+        /// 含まれていれば該当の語を返す。テンプレートの変更や数値の表記で混入した場合に、
+        /// 公開前に除外できるようにする。</summary>
+        private static string FindBannedWord(string text)
         {
             foreach (var word in BannedWords)
             {
-                if (text.Contains(word))
-                    throw new InvalidOperationException($"生成文に禁止表現「{word}」が含まれています: {text}");
+                if (text.Contains(word)) return word;
             }
+            return null;
         }
+
+        /// <summary>データ充足率の表記。6項目すべて算出できた場合は「100%」と書かず
+        /// 「全6項目」とする（「100%」は断定表現として禁止しているため）。</summary>
+        private static string CompletenessText(double completeness) =>
+            (int)Math.Round(completeness * 6) >= 6 ? "全6項目を算出済み" : $"データ充足率{completeness:P0}";
 
         private static (RaceKey Key, bool Ok) TryBuildRaceKey(string year, string monthDay, string jyoCd, string raceNum, DateTime targetDate)
         {
