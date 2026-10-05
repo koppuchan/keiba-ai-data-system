@@ -106,6 +106,29 @@ namespace KeibaDataCollector.Interop
             };
         }
 
+        /// <summary>地方競馬(UmaConn)の"NU"レコード（DIFN、1,492バイト）から父・母父を取り出す。
+        /// レイアウトは公開されていないが、probeで実レコードの10桁の数字を調べた結果、
+        /// 先頭からの位置が競走馬マスタ(UM)と同じ（血統登録番号=12バイト目、3代血統の
+        /// 14頭分が205バイト目から46バイト刻み＝繁殖登録番号10＋馬名36）であることを確認した。
+        /// [0]=父、[4]=母父もUMと同じ並びとみなす。4頭目以降の位置は、実データ上で
+        /// 251,297,343,389,435…と46バイト刻みで並んでいたことから裏付けている。</summary>
+        public static PedigreeLink ParseLocalHorseMasterPedigree(string rawRecord)
+        {
+            const int Ketto3Start = 204;   // 0始まり（1始まりで205バイト目）
+            const int EntryLength = 46;
+            const int IdLength = 10;
+
+            if (rawRecord == null || rawRecord.Length < Ketto3Start + EntryLength * 14)
+                return new PedigreeLink { KettoNum = string.Empty };
+
+            return new PedigreeLink
+            {
+                KettoNum = Trim(rawRecord.Substring(11, 10)),
+                SireHansyokuNum = Trim(rawRecord.Substring(Ketto3Start, IdLength)),
+                BroodmareSireHansyokuNum = Trim(rawRecord.Substring(Ketto3Start + EntryLength * 4, IdLength)),
+            };
+        }
+
         /// <summary>"HN"レコード（繁殖馬マスタ）から繁殖登録番号と馬名を取り出す。</summary>
         public static BroodstockName ParseBroodstockName(string rawRecord)
         {
