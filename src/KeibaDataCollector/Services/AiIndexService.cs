@@ -22,7 +22,7 @@ namespace KeibaDataCollector.Services
 
         /// <summary>特徴量抽出ロジック（FactorScoringServiceの各Compute*メソッド）を変えたら上げる。
         /// モデル式は同じでも特徴量の算出方法が変われば別バージョンとして扱う。</summary>
-        public const string FeatureVersion = "features-v1";
+        public const string FeatureVersion = "features-v2";
 
         private readonly FactorScoringService _scoring;
         private readonly ScoresStore _scores;

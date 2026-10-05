@@ -45,7 +45,7 @@ namespace KeibaDataCollector.Services
                 ParamPace = ComputePaceScore(input.KettoNum, input.TrackCode, input.Distance, input.TrackSurfaceCode),
                 ParamAgariQ = ComputeAgariQuality(input.KettoNum, input.TrackSurfaceCode),
                 ParamJockeyRoi = ComputeJockeyRoi(input.TrackCode, input.Distance, input.JockeyCode),
-                ParamPedigreeFit = ComputePedigreeFit(input.KettoNum, input.TrackCode, input.Distance),
+                ParamPedigreeFit = ComputePedigreeFit(input.KettoNum, input.TrackCode, input.TrackSurfaceCode, input.Distance),
                 ParamTrainingAcc = ComputeTrainingAcceleration(input.KettoNum),
             };
         }
@@ -239,7 +239,7 @@ namespace KeibaDataCollector.Services
         /// （当初は複勝率のみだったが、回収率側が未実装のまま欠けていたため追加した）。
         /// 母父も同様に計算し、父スコアと平均する（父だけだと種牡馬側のサンプルに偏りが
         /// 出やすいため）。pedigree_linksが空の場合（血統データ未取得）は常にnullを返す。</summary>
-        private double? ComputePedigreeFit(string kettoNum, string trackCode, int distance)
+        private double? ComputePedigreeFit(string kettoNum, string trackCode, string surfaceCode, int distance)
         {
             string sire = null, broodmareSire = null;
             using (var cmd = new SQLiteCommand(
@@ -258,41 +258,71 @@ namespace KeibaDataCollector.Services
             if (string.IsNullOrEmpty(sire) && string.IsNullOrEmpty(broodmareSire)) return null;
 
             var sireScore = string.IsNullOrEmpty(sire) ? (double?)null
-                : ComputeSireLineScore(trackCode, distance, sire);
+                : ComputeSireLineScore(trackCode, surfaceCode, distance, sire);
             var bmsScore = string.IsNullOrEmpty(broodmareSire) ? (double?)null
-                : ComputeSireLineScore(trackCode, distance, broodmareSire);
+                : ComputeSireLineScore(trackCode, surfaceCode, distance, broodmareSire);
 
             if (sireScore.HasValue && bmsScore.HasValue) return (sireScore.Value + bmsScore.Value) / 2.0;
             return sireScore ?? bmsScore;
         }
 
-        private double? ComputeSireLineScore(string trackCode, int distance, string hansyokuNum)
+        private readonly Dictionary<string, Dictionary<string, (double PlaceRate, double Roi)>> _sireStatsCache =
+            new Dictionary<string, Dictionary<string, (double PlaceRate, double Roi)>>();
+
+        /// <summary>種牡馬の産駒成績で適性を測る。「同じ競馬場・同じ距離」で20走以上ある種牡馬は
+        /// 少なく（実機: 地方で⑤が約50%止まり）、そこだけだと父が分かっていても算出できない。
+        /// 条件を緩めた順に試す: ①同競馬場・同距離 → ②同馬場種別(芝/ダ/障)・同距離（競馬場問わず）
+        /// → ③同競馬場・同馬場種別（距離問わず）。いずれも母集団が足りなければnull。</summary>
+        private double? ComputeSireLineScore(string trackCode, string surfaceCode, int distance, string hansyokuNum)
         {
-            var stats = new Dictionary<string, (double PlaceRate, double Roi)>();
-            using (var cmd = new SQLiteCommand(@"
-                SELECT pl.sire_hansyoku_num, COUNT(*) total,
-                       SUM(CASE WHEN re.chakujun BETWEEN 1 AND 3 THEN 1 ELSE 0 END) placed,
-                       SUM(COALESCE(re.fukusho_payout, 0)) payout
-                FROM race_entries re
-                JOIN pedigree_links pl ON re.ketto_num = pl.ketto_num
-                WHERE re.track_code=@track AND re.distance=@distance AND re.chakujun > 0
-                  AND pl.sire_hansyoku_num IS NOT NULL AND pl.sire_hansyoku_num <> ''
-                GROUP BY pl.sire_hansyoku_num
-                HAVING COUNT(*) >= @minSample;", _conn))
+            var surface = string.IsNullOrEmpty(surfaceCode) ? null : surfaceCode.Substring(0, 1);
+
+            var score = SireScoreAt("track-distance", trackCode + "|" + distance,
+                    "re.track_code=@track AND re.distance=@distance", trackCode, null, distance, hansyokuNum);
+            if (score.HasValue || surface == null) return score;
+
+            score = SireScoreAt("surface-distance", surface + "|" + distance,
+                "SUBSTR(re.track_surface_code,1,1)=@surface AND re.distance=@distance", null, surface, distance, hansyokuNum);
+            if (score.HasValue) return score;
+
+            return SireScoreAt("track-surface", trackCode + "|" + surface,
+                "re.track_code=@track AND SUBSTR(re.track_surface_code,1,1)=@surface", trackCode, surface, 0, hansyokuNum);
+        }
+
+        private double? SireScoreAt(string level, string key, string condition,
+            string trackCode, string surface, int distance, string hansyokuNum)
+        {
+            var cacheKey = level + "|" + key;
+            if (!_sireStatsCache.TryGetValue(cacheKey, out var stats))
             {
-                cmd.Parameters.AddWithValue("@track", trackCode);
-                cmd.Parameters.AddWithValue("@distance", distance);
-                cmd.Parameters.AddWithValue("@minSample", MinGroupSample);
-                using (var r = cmd.ExecuteReader())
+                stats = new Dictionary<string, (double PlaceRate, double Roi)>();
+                using (var cmd = new SQLiteCommand($@"
+                    SELECT pl.sire_hansyoku_num, COUNT(*) total,
+                           SUM(CASE WHEN re.chakujun BETWEEN 1 AND 3 THEN 1 ELSE 0 END) placed,
+                           SUM(COALESCE(re.fukusho_payout, 0)) payout
+                    FROM race_entries re
+                    JOIN pedigree_links pl ON re.ketto_num = pl.ketto_num
+                    WHERE {condition} AND re.chakujun > 0
+                      AND pl.sire_hansyoku_num IS NOT NULL AND pl.sire_hansyoku_num <> ''
+                    GROUP BY pl.sire_hansyoku_num
+                    HAVING COUNT(*) >= @minSample;", _conn))
                 {
-                    while (r.Read())
+                    if (trackCode != null) cmd.Parameters.AddWithValue("@track", trackCode);
+                    if (surface != null) cmd.Parameters.AddWithValue("@surface", surface);
+                    if (condition.Contains("@distance")) cmd.Parameters.AddWithValue("@distance", distance);
+                    cmd.Parameters.AddWithValue("@minSample", MinGroupSample);
+                    using (var r = cmd.ExecuteReader())
                     {
-                        var total = r.GetInt64(1);
-                        stats[r.GetString(0)] = (
-                            (double)r.GetInt64(2) / total,
-                            r.GetDouble(3) / (total * 100.0));
+                        while (r.Read())
+                        {
+                            var total = r.GetInt64(1);
+                            stats[r.GetString(0)] = (
+                                (double)r.GetInt64(2) / total,
+                                r.GetDouble(3) / (total * 100.0));
+                        }
                     }
                 }
+                _sireStatsCache[cacheKey] = stats;
             }
 
             if (!stats.TryGetValue(hansyokuNum, out var thisStat) || stats.Count < 2) return null;
