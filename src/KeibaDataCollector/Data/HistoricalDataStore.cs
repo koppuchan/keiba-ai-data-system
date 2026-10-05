@@ -342,6 +342,40 @@ namespace KeibaDataCollector.Data
             }
         }
 
+        /// <summary>出走実績のある馬のうち、父が分かっている馬の割合を中央/地方別に出し、
+        /// 父が分からない地方馬の血統登録番号を数頭ぶん表示する。血統適性(⑤)が低い原因が
+        /// 「そもそも血統データに居ない」のか「居るが父が空」なのか、IDの食い違いなのかを
+        /// 切り分けるための調査用。</summary>
+        private void PrintPedigreeCoverage()
+        {
+            const string central = "re.track_code BETWEEN '01' AND '10'";
+            Console.WriteLine("  出走実績のある馬のうち父が分かる馬:");
+            using (var cmd = new SQLiteCommand($@"
+                SELECT CASE WHEN {central} THEN '中央' ELSE '地方' END,
+                       COUNT(DISTINCT re.ketto_num),
+                       COUNT(DISTINCT CASE WHEN pl.sire_hansyoku_num IS NOT NULL THEN re.ketto_num END),
+                       COUNT(DISTINCT CASE WHEN pl.ketto_num IS NOT NULL THEN re.ketto_num END)
+                FROM race_entries re LEFT JOIN pedigree_links pl ON re.ketto_num = pl.ketto_num
+                GROUP BY 1;", _conn))
+            using (var r = cmd.ExecuteReader())
+            {
+                while (r.Read())
+                    Console.WriteLine($"    {r.GetString(0)}: 馬 {r.GetInt64(1)}頭 / 父あり {r.GetInt64(2)}頭 / 血統の行あり {r.GetInt64(3)}頭");
+            }
+
+            Console.WriteLine("  父が分からない地方馬の例（新しい順、血統登録番号）:");
+            using (var cmd = new SQLiteCommand($@"
+                SELECT re.ketto_num, MAX(re.race_date), MAX(CASE WHEN pl.ketto_num IS NULL THEN 0 ELSE 1 END)
+                FROM race_entries re LEFT JOIN pedigree_links pl ON re.ketto_num = pl.ketto_num
+                WHERE NOT ({central}) AND pl.sire_hansyoku_num IS NULL
+                GROUP BY re.ketto_num ORDER BY MAX(re.race_date) DESC LIMIT 6;", _conn))
+            using (var r = cmd.ExecuteReader())
+            {
+                while (r.Read())
+                    Console.WriteLine($"    {r.GetString(0)}  最終出走={r.GetString(1)}  血統の行={(r.GetInt64(2) == 1 ? "あり(父が空)" : "なし")}");
+            }
+        }
+
         /// <summary>蓄積済みデータの件数・日付範囲をコンソールに出す。
         /// DBファイルそのものをやり取りする代わりに、統計だけを確認できるようにするための
         /// 調査用コマンド（Program.csの"dbstats"から呼ぶ）。</summary>
@@ -388,6 +422,7 @@ namespace KeibaDataCollector.Data
             using (var cmd = new SQLiteCommand("SELECT COUNT(*) FROM broodstock_names;", _conn))
                 Console.WriteLine($"  broodstock_names: {cmd.ExecuteScalar()}件");
             Console.WriteLine("  （血統は生年月日を保存していないため、日付範囲はbackfill実行時のログでのみ確認可）");
+            PrintPedigreeCoverage();
         }
 
         private static string ReadOrNull(SQLiteDataReader r, int i) => r.IsDBNull(i) ? "N/A" : r.GetString(i);
