@@ -16,6 +16,9 @@ namespace KeibaDataCollector.Models
         public bool HitTop3 { get; set; }
         public bool HitWin { get; set; }
         public DateTime VerifiedAtUtc { get; set; }
+
+        /// <summary>レースのトラックコード（芝/ダート等の判別用）。サイトの芝・ダート別集計に使う。</summary>
+        public string TrackSurfaceCode { get; set; }
     }
 
     /// <summary>仕様書§18「指数帯別成績をmodel_versionごとに分離」。AI指数を10点刻みの帯に分け、

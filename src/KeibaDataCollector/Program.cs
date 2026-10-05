@@ -96,6 +96,15 @@ namespace KeibaDataCollector
                 }
                 return;
             }
+            if (mode == "verifyreport")
+            {
+                using (var historical = new HistoricalDataStore(AppConfig.HistoricalDbPath))
+                using (var verificationStore = new VerificationStore(historical.Connection))
+                {
+                    PublishVerificationReport(verificationStore);
+                }
+                return;
+            }
             if (mode == "backup")
             {
                 try
@@ -378,6 +387,7 @@ namespace KeibaDataCollector
                         {
                             RunVerifyFor(jvLink, predictionStore, verificationStore, targetDate);
                             RunVerifyFor(umaConn, predictionStore, verificationStore, targetDate);
+                            PublishVerificationReport(verificationStore);
                         }
                         break;
                     }
@@ -397,7 +407,7 @@ namespace KeibaDataCollector
 
         private static void PrintUsage()
         {
-            Console.WriteLine("使い方: KeibaDataCollector.exe [setup|morning|predict|score|watch|probe|backfill|dbstats|trend|content|verify|backup|healthcheck|notifytest|licensegate|weights|stats|dashboard]");
+            Console.WriteLine("使い方: KeibaDataCollector.exe [setup|morning|predict|score|watch|probe|backfill|dbstats|trend|content|verify|verifyreport|backup|healthcheck|notifytest|licensegate|weights|stats|dashboard]");
             Console.WriteLine("  setup       : 初回のみ。利用キー等をGUIダイアログで設定する。");
             Console.WriteLine("  morning     : 朝一バッチ。当日の出走表を取得しWordPressへ反映する。");
             Console.WriteLine("  predict     : 朝一オッズの人気順から予想印を生成しWordPressへ反映する。");
@@ -427,6 +437,7 @@ namespace KeibaDataCollector
             Console.WriteLine("              止まっていればメール通知する（COMには接続しない）。");
             Console.WriteLine("  notifytest  : SMTP設定でテストメールを1通送る。");
             Console.WriteLine("  backup      : historical.sqlite3のバックアップを作成する（直近14世代を保持）。");
+            Console.WriteLine("  verifyreport: 検証結果を集計してサイトの検証ページへ送る（verifyの最後にも自動で行う）。");
             Console.WriteLine("  stats       : 指数帯別の3着内率・勝率を表示する（要:事前のverify実行）。");
             Console.WriteLine("              stats <Nerai|Ana|Kiken|AiIndexTop5> <modelVersion>");
             Console.WriteLine("  licensegate : LicenseGate（公開許諾状態）の確認・更新。詳細は `licensegate` (引数なし) 実行。");
@@ -709,6 +720,38 @@ namespace KeibaDataCollector
             catch (Exception ex)
             {
                 LogFailure(source.SourceName, "本日の狙い馬・穴馬・危険な人気馬の生成・公開に失敗（このソースのみスキップして続行）", ex, critical: true);
+            }
+        }
+
+        /// <summary>検証結果を集計してサイトの検証ページへ送る。自動公開OFFの間は送らない
+        /// （他の公開物と同じ扱い）。失敗は重大エラーとして通知する。</summary>
+        private static void PublishVerificationReport(VerificationStore verificationStore)
+        {
+            try
+            {
+                var report = VerificationReportService.Build(verificationStore);
+                if (report.Models.Count == 0)
+                {
+                    Console.WriteLine("[verify] 検証済みの予測がまだ無いため、検証ページへは送りません。");
+                    return;
+                }
+
+                var wp = new WordPressClient(
+                    AppConfig.WordPressBaseUrl, AppConfig.WordPressUser, AppConfig.WordPressAppPassword);
+                if (!wp.IsAutoPublishEnabledAsync().GetAwaiter().GetResult())
+                {
+                    Console.WriteLine("[verify] 自動公開がOFFのため、検証ページへは送りません。");
+                    return;
+                }
+
+                wp.PushVerificationReportAsync(report).GetAwaiter().GetResult();
+                Console.WriteLine($"[verify] 検証ページを更新しました（{report.Models.Count}モデル、" +
+                    $"{report.Models.Sum(m => m.Predictions)}件）。");
+                LogSuccess("verify", "検証結果の公開", "正常終了");
+            }
+            catch (Exception ex)
+            {
+                LogFailure("verify", "検証結果のサイト公開に失敗", ex, critical: true);
             }
         }
 

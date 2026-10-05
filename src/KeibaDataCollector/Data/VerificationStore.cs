@@ -52,6 +52,10 @@ namespace KeibaDataCollector.Data
                 CREATE INDEX IF NOT EXISTS idx_verification_model
                     ON verification(model_version, category);
             ");
+
+            // 芝/ダート別の集計用。既存DBにはこの列が無いため追加する（重複エラーは想定内）。
+            try { Exec("ALTER TABLE verification ADD COLUMN track_surface_code TEXT;"); }
+            catch (SQLiteException ex) when (ex.Message.IndexOf("duplicate column", StringComparison.OrdinalIgnoreCase) >= 0) { }
         }
 
         public void Upsert(VerificationRecord record)
@@ -59,10 +63,10 @@ namespace KeibaDataCollector.Data
             Exec(@"
                 INSERT INTO verification
                     (prediction_id, race_date, track_code, race_number, umaban, category,
-                     model_version, chakujun, hit_top3, hit_win, verified_at_utc)
+                     model_version, chakujun, hit_top3, hit_win, verified_at_utc, track_surface_code)
                 VALUES
                     (@id, @date, @track, @raceNum, @umaban, @category,
-                     @modelVer, @chakujun, @top3, @win, @verified)
+                     @modelVer, @chakujun, @top3, @win, @verified, @surface)
                 ON CONFLICT(prediction_id) DO UPDATE SET
                     chakujun=excluded.chakujun,
                     hit_top3=excluded.hit_top3,
@@ -82,6 +86,7 @@ namespace KeibaDataCollector.Data
                     p.AddWithValue("@top3", record.HitTop3 ? 1 : 0);
                     p.AddWithValue("@win", record.HitWin ? 1 : 0);
                     p.AddWithValue("@verified", record.VerifiedAtUtc.ToString("o"));
+                    p.AddWithValue("@surface", (object)record.TrackSurfaceCode ?? DBNull.Value);
                 });
         }
 
@@ -102,6 +107,46 @@ namespace KeibaDataCollector.Data
                 }
             }
             return set;
+        }
+
+        /// <summary>サイト公開用の検証データ。公開済み（Validator合格）の予測のうち、同じ
+        /// （レース・馬・カテゴリ・モデル）は最初に公開した1件だけを使い、確定結果が付いたものを返す。
+        /// 予測は20分おきに再生成されて行が増えるため、全行を数えると母数が水増しされ、
+        /// また後の行を選べば成績を良く見せられてしまう。</summary>
+        public List<VerifiedPick> GetFirstPublishedResults()
+        {
+            var result = new List<VerifiedPick>();
+            using (var cmd = new SQLiteCommand(@"
+                SELECT fp.race_date, fp.track_code, fp.race_number, fp.umaban, fp.category, fp.model_version,
+                       fp.ai_index_snapshot, v.hit_top3, v.hit_win, v.track_surface_code
+                FROM (
+                    SELECT prediction_id, race_date, track_code, race_number, umaban, category, model_version,
+                           ai_index_snapshot, MIN(created_at_utc) AS first_at
+                    FROM predictions
+                    WHERE validator_passed = 1
+                    GROUP BY race_date, track_code, race_number, umaban, category, model_version
+                ) fp
+                JOIN verification v ON v.prediction_id = fp.prediction_id;", _conn))
+            using (var r = cmd.ExecuteReader())
+            {
+                while (r.Read())
+                {
+                    result.Add(new VerifiedPick
+                    {
+                        RaceDate = r.GetString(0),
+                        TrackCode = r.GetString(1),
+                        RaceNumber = r.GetInt32(2),
+                        Umaban = r.GetInt32(3),
+                        Category = r.GetString(4),
+                        ModelVersion = r.IsDBNull(5) ? null : r.GetString(5),
+                        AiIndex = r.IsDBNull(6) ? (double?)null : r.GetDouble(6),
+                        HitTop3 = r.GetInt32(7) != 0,
+                        HitWin = r.GetInt32(8) != 0,
+                        TrackSurfaceCode = r.IsDBNull(9) ? null : r.GetString(9),
+                    });
+                }
+            }
+            return result;
         }
 
         /// <summary>仕様書§18「指数帯別成績をmodel_versionごとに分離」。predictionsとverificationを

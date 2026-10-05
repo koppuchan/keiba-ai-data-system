@@ -37,7 +37,7 @@ namespace KeibaDataCollector.Services
 
         public VerificationRunSummary VerifyVenue(DateTime raceDate, string trackCode)
         {
-            var results = ReadTodayResults(raceDate, trackCode);
+            var (results, surfaceByRace) = ReadTodayResults(raceDate, trackCode);
             var alreadyVerified = _verification.GetVerifiedPredictionIds(raceDate, trackCode);
             var predictions = _predictions.GetForVenue(raceDate, trackCode)
                 .Where(p => p.ValidatorPassed) // 非公開だったものは検証対象にしない。
@@ -67,6 +67,7 @@ namespace KeibaDataCollector.Services
                     HitTop3 = chakujun >= 1 && chakujun <= 3,
                     HitWin = chakujun == 1,
                     VerifiedAtUtc = DateTime.UtcNow,
+                    TrackSurfaceCode = surfaceByRace.TryGetValue(p.RaceNumber, out var surface) ? surface : null,
                 });
                 verified++;
             }
@@ -79,13 +80,16 @@ namespace KeibaDataCollector.Services
             };
         }
 
-        /// <summary>(race_number, umaban) -> 確定着順。chakujun>0（確定済み）の行のみ含む。</summary>
-        private Dictionary<(int RaceNumber, int Umaban), int> ReadTodayResults(DateTime targetDate, string trackCode)
+        /// <summary>(race_number, umaban) -> 確定着順（chakujun>0＝確定済みの行のみ）と、
+        /// レース番号 -> トラックコード（サイトの芝・ダート別集計用）。</summary>
+        private (Dictionary<(int RaceNumber, int Umaban), int> Results, Dictionary<int, string> SurfaceByRace)
+            ReadTodayResults(DateTime targetDate, string trackCode)
         {
             var result = new Dictionary<(int, int), int>();
+            var surfaceByRace = new Dictionary<int, string>();
 
             var open = _source.Open("RACE", EarlyAnchorFromTime, DataOption.ThisWeekAndToday);
-            if (open.ReturnCode == -1) { _source.Close(); return result; }
+            if (open.ReturnCode == -1) { _source.Close(); return (result, surfaceByRace); }
             if (open.ReturnCode < 0)
             {
                 _source.Close();
@@ -103,7 +107,17 @@ namespace KeibaDataCollector.Services
                     if (size < 0)
                         throw new InvalidOperationException($"{_source.SourceName} Read failed: {size}");
 
-                    if (JvRecordParser.GetRecordTypeId(buffer) != "SE") continue;
+                    var typeId = JvRecordParser.GetRecordTypeId(buffer);
+                    if (typeId == "RA")
+                    {
+                        var ra = new JV_RA_RACE();
+                        ra.SetDataB(ref buffer);
+                        var (raKey, raOk) = TryBuildRaceKey(ra.id.Year, ra.id.MonthDay, ra.id.JyoCD, ra.id.RaceNum, targetDate);
+                        if (raOk && raKey.TrackCode == trackCode)
+                            surfaceByRace[raKey.RaceNumber] = Trim(ra.TrackCD);
+                        continue;
+                    }
+                    if (typeId != "SE") continue;
 
                     var se = new JV_SE_RACE_UMA();
                     se.SetDataB(ref buffer);
@@ -122,7 +136,7 @@ namespace KeibaDataCollector.Services
                 _source.Close();
             }
 
-            return result;
+            return (result, surfaceByRace);
         }
 
         private static (RaceKey Key, bool Ok) TryBuildRaceKey(string year, string monthDay, string jyoCd, string raceNum, DateTime targetDate)
