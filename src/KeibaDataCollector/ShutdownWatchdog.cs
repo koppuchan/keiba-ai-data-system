@@ -30,6 +30,28 @@ namespace KeibaDataCollector
         private static readonly TimeSpan HardKillAfter = TimeSpan.FromSeconds(10);
 
         /// <summary>
+        /// 開始時に呼ぶ。作業そのものが（COMの応答待ちなどで）終わらない場合に、制限時間で
+        /// プロセスを終了させる。終了コードは1（異常）。COMのロック（ComAccessLock）はプロセス終了で解放される。
+        /// </summary>
+        public static void ArmRunLimit(TimeSpan limit)
+        {
+            new Thread(() =>
+            {
+                Thread.Sleep(limit);
+                Console.WriteLine($"[watchdog] 処理が{limit.TotalMinutes:0}分以内に終わらなかったため、プロセスを終了します。" +
+                                  "（JV-Link/UmaConnの応答待ちが原因の可能性）");
+                Console.Out.Flush();
+                new Thread(() => Environment.Exit(1)) { IsBackground = true }.Start();
+                Thread.Sleep(HardKillAfter);
+                Process.GetCurrentProcess().Kill();
+            })
+            {
+                IsBackground = true,
+                Name = "run-limit-watchdog",
+            }.Start();
+        }
+
+        /// <summary>
         /// 作業完了後に呼ぶ。正常に終了できればこの監視は何もしない
         /// （バックグラウンドスレッドなのでプロセス終了を妨げない）。
         /// </summary>

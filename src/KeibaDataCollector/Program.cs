@@ -20,6 +20,17 @@ namespace KeibaDataCollector
         // 他の処理がJV-Link/UmaConnを使用中のとき、順番を待つ最長時間（ComAccessLock参照）。
         private static readonly TimeSpan ComLockWait = TimeSpan.FromMinutes(10);
 
+        // 定期実行のモードの最長実行時間。通常は数分で終わるため、これを超えるのはCOMの応答待ち等で
+        // 止まっているとみなして終了させる（止まったままだと次回以降が全部待たされる）。
+        // backfill/probeは長時間かかりうるため対象外。
+        private static readonly Dictionary<string, TimeSpan> RunLimits = new Dictionary<string, TimeSpan>
+        {
+            { "score", TimeSpan.FromMinutes(25) },
+            { "content", TimeSpan.FromMinutes(25) },
+            { "trend", TimeSpan.FromMinutes(25) },
+            { "verify", TimeSpan.FromMinutes(25) },
+        };
+
         // COM(ActiveX)相手はSTAスレッドが前提のため必須。
         [STAThread]
         private static int Main(string[] args)
@@ -41,6 +52,13 @@ namespace KeibaDataCollector
                         Console.WriteLine($"[{mode}] 他の処理がJV-Link/UmaConnを使用中のため、今回は見送ります（{ComLockWait.TotalMinutes:0}分待ちました）。");
                         return 0;
                     }
+                }
+
+                // setupはJV-Link/UmaConnの設定画面を人が操作するため、自動で閉じない・時間で止めない。
+                if (ComAccessLock.IsComMode(mode) && mode != "setup")
+                {
+                    DialogGuard.Start();
+                    if (RunLimits.TryGetValue(mode, out var limit)) ShutdownWatchdog.ArmRunLimit(limit);
                 }
 
                 Run(mode, arg, args);
