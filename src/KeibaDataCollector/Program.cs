@@ -18,7 +18,19 @@ namespace KeibaDataCollector
         private static bool _hadFailure;
 
         // 他の処理がJV-Link/UmaConnを使用中のとき、順番を待つ最長時間（ComAccessLock参照）。
+        // 20分おきに繰り返す処理は、待たされるくらいなら見送って次回に回す（待ち時間は短く）。
         private static readonly TimeSpan ComLockWait = TimeSpan.FromMinutes(10);
+
+        // 1日1回だけ動く処理（朝・終了後の傾向、検証、backfill等）は、見送ると次の実行が翌日になり、
+        // その日の分が欠けてしまう。20分おきの処理の合間に順番が回ってくるまで長めに待つ。
+        private static readonly TimeSpan ComLockWaitDaily = TimeSpan.FromMinutes(60);
+
+        private static TimeSpan LockWaitFor(string mode, string[] args)
+        {
+            var isRepeating = mode == "score" || mode == "content"
+                || (mode == "trend" && args.Length > 1 && args[1] == "live");
+            return isRepeating ? ComLockWait : ComLockWaitDaily;
+        }
 
         // 定期実行のモードの最長実行時間。通常は数分で終わるため、これを超えるのはCOMの応答待ち等で
         // 止まっているとみなして終了させる（止まったままだと次回以降が全部待たされる）。
@@ -44,12 +56,13 @@ namespace KeibaDataCollector
             {
                 if (ComAccessLock.IsComMode(mode))
                 {
-                    comLock = ComAccessLock.TryAcquire(ComLockWait);
+                    var wait = LockWaitFor(mode, args);
+                    comLock = ComAccessLock.TryAcquire(wait);
                     if (comLock == null)
                     {
-                        // 他の処理が長引いているだけで異常ではない。次回の実行で処理される
+                        // 他の処理が長引いているだけで異常ではない。繰り返し実行の処理は次回に回る
                         // （止まったままなら更新停止の監視が知らせる）。
-                        Console.WriteLine($"[{mode}] 他の処理がJV-Link/UmaConnを使用中のため、今回は見送ります（{ComLockWait.TotalMinutes:0}分待ちました）。");
+                        Console.WriteLine($"[{mode}] 他の処理がJV-Link/UmaConnを使用中のため、今回は見送ります（{wait.TotalMinutes:0}分待ちました）。");
                         return 0;
                     }
                 }
