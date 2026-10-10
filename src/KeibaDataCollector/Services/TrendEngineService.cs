@@ -41,6 +41,8 @@ namespace KeibaDataCollector.Services
         public VenueTrendSnapshot ComputeAndSave(DateTime raceDate, string trackCode, TrendStage stage)
         {
             var todayRaces = ReadTodayRaces(raceDate, trackCode);
+            // 朝段階はまだ結果が無いので、開催中・終了後だけ速報成績で補う。
+            if (stage != TrendStage.Morning) AddRealtimeResults(raceDate, trackCode, todayRaces);
             var finished = todayRaces.Where(r => r.IsFinished).ToList();
 
             var snapshot = new VenueTrendSnapshot
@@ -186,11 +188,112 @@ namespace KeibaDataCollector.Services
             return races.Values.ToList();
         }
 
+        /// <summary>
+        /// 蓄積データ（RACE）には、当日の確定着順・上がり・通過順がレース後しばらく（時間〜翌日）入らない
+        /// （実機: 開催終了後の21時台でも「サンプル不足」のままだった）。結果がまだ入っていないレースは、
+        /// レース単位の速報成績（0B12）から補う。VerificationServiceと同じ方法で、全馬着順まで揃った
+        /// （データ区分6以降）レースだけを使う（3着までしか分からない時点で他の馬を集計に混ぜないため）。
+        /// 速報成績の取得に失敗したレースは、そのレースだけ飛ばして残りを続ける。
+        /// </summary>
+        private void AddRealtimeResults(DateTime raceDate, string trackCode, List<TodayRace> races)
+        {
+            foreach (var race in races.Where(r => !r.IsFinished).OrderBy(r => r.Key.RaceNumber))
+            {
+                try
+                {
+                    int rc = _source.OpenRealtime("0B12", new RaceKey
+                    {
+                        TrackCode = trackCode, RaceDate = raceDate, RaceNumber = race.Key.RaceNumber,
+                    }.AsJvRealtimeKey());
+                    if (rc == -1) { _source.Close(); continue; } // まだ確定していない。
+                    if (rc != 0)
+                    {
+                        _source.Close();
+                        throw new InvalidOperationException($"{_source.SourceName} OpenRealtime(0B12) failed: {rc}");
+                    }
+
+                    var horses = new Dictionary<int, TodayHorse>();
+                    JV_RA_RACE? ra = null;
+                    var complete = false;
+                    try
+                    {
+                        while (true)
+                        {
+                            int size = _source.Read(out var buffer, out _);
+                            if (size == 0) break;
+                            if (size == -1) continue;
+                            if (size == -3) { System.Threading.Thread.Sleep(500); continue; }
+                            if (size < 0)
+                                throw new InvalidOperationException($"{_source.SourceName} Read failed: {size}");
+
+                            var typeId = JvRecordParser.GetRecordTypeId(buffer);
+                            var dataKubun = JvRecordParser.GetDataKubun(buffer);
+                            if (typeId == "SE")
+                            {
+                                var se = new JV_SE_RACE_UMA();
+                                se.SetDataB(ref buffer);
+                                var umaban = SafeInt(se.Umaban);
+                                if (umaban <= 0) continue;
+                                horses[umaban] = new TodayHorse
+                                {
+                                    Umaban = umaban,
+                                    Waku = SafeInt(se.Wakuban),
+                                    Chakujun = SafeInt(se.KakuteiJyuni),
+                                    Agari3F = SafeTenths(se.HaronTimeL3),
+                                    IsScratched = AiIndexService.IsScratchedCode(Trim(se.IJyoCD)),
+                                };
+                                if (dataKubun == "6" || dataKubun == "7") complete = true;
+                            }
+                            else if (typeId == "RA")
+                            {
+                                var parsed = new JV_RA_RACE();
+                                parsed.SetDataB(ref buffer);
+                                ra = parsed;
+                                if (dataKubun == "6" || dataKubun == "7") complete = true;
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        _source.Close();
+                    }
+
+                    if (!complete || !horses.Values.Any(h => !h.IsScratched && h.Chakujun > 0)) continue;
+
+                    race.Horses = horses.Values.ToList();
+                    if (ra.HasValue)
+                    {
+                        var record = ra.Value;
+                        race.EarliestCornerOrder = JvFactorRecordParser.ParseEarliestCornerOrder(record);
+                        race.LatestCornerOrder = JvFactorRecordParser.ParseLatestCornerOrder(record);
+                        var weather = Trim(record.TenkoBaba.TenkoCD);
+                        if (HasCode(weather)) race.WeatherCode = weather;
+                        var turf = Trim(record.TenkoBaba.SibaBabaCD);
+                        if (HasCode(turf)) race.TurfConditionCode = turf;
+                        var dirt = Trim(record.TenkoBaba.DirtBabaCD);
+                        if (HasCode(dirt)) race.DirtConditionCode = dirt;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine(
+                        $"[{_source.SourceName}] {trackCode} {race.Key.RaceNumber}R の速報成績を取得できませんでした（このレースは集計に含めません）: {ex.Message}");
+                }
+            }
+        }
+
+        private static bool HasCode(string code) => code.Length > 0 && code.Trim('0').Length > 0;
+
         private static WeatherTrackInfo LatestWeather(List<TodayRace> races)
         {
             // レース番号が最も進んでいる（＝直近発走に近い）記録を「現在の」天候・馬場状態とする。
             // 馬場状態は開催中に悪化/回復することがあるため、朝一番の値のままにしない。
-            var latest = races.OrderByDescending(r => r.Key.RaceNumber).FirstOrDefault();
+            // ただし、まだ天候・馬場が入っていない（コード0/空）後ろのレースは飛ばし、
+            // 入っている中で最も進んだレースの値を使う。
+            var latest = races.Where(r => HasCode(r.WeatherCode ?? string.Empty) || HasCode(r.TurfConditionCode ?? string.Empty)
+                                          || HasCode(r.DirtConditionCode ?? string.Empty))
+                              .OrderByDescending(r => r.Key.RaceNumber).FirstOrDefault()
+                         ?? races.OrderByDescending(r => r.Key.RaceNumber).FirstOrDefault();
             if (latest == null) return new WeatherTrackInfo();
             return new WeatherTrackInfo
             {
