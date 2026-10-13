@@ -35,7 +35,7 @@ namespace KeibaDataCollector
 
         /// <summary>OSにプロセスを即時終了させる（.NETの終了処理やCOMの後片付けを一切待たない）。
         /// 失敗した場合だけ Process.Kill にフォールバックする。</summary>
-        private static void HardExit(int exitCode)
+        internal static void HardExit(int exitCode)
         {
             try { TerminateProcess(GetCurrentProcess(), (uint)exitCode); } catch { }
             Process.GetCurrentProcess().Kill();
@@ -86,11 +86,7 @@ namespace KeibaDataCollector
                     "（COM解放時のダイアログ等が原因。作業自体は完了しています）");
                 Console.Out.Flush();
 
-                // まずは終了コードを保ったまま終わらせる。
-                new Thread(() => Environment.Exit(exitCode)) { IsBackground = true }.Start();
-
-                // Environment.Exit も終了ハンドラで固まりうるので、最後は問答無用で落とす。
-                Thread.Sleep(HardKillAfter);
+                // Environment.ExitもExitProcess経由でDLLの終了処理（UmaConnのダイアログ）を通るため使わない。
                 HardExit(exitCode);
             })
             {

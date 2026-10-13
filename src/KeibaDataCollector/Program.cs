@@ -47,6 +47,20 @@ namespace KeibaDataCollector
         [STAThread]
         private static int Main(string[] args)
         {
+            var exitCode = RunMain(args);
+
+            // returnで終わらせない。.NETの通常終了（ExitProcess）はDLLの終了処理を呼び、UmaConn(Delphi)が
+            // 「Unexpected Memory Leak」ダイアログを出して固まることがある。この時点で他のスレッドは先に
+            // 消されており、ShutdownWatchdogの強制終了も動かない（実測 2026-10-13）。
+            // 作業は終わっているので、ログを書き切ってからOSにプロセスを直接終了させる。
+            Console.Out.Flush();
+            Console.Error.Flush();
+            ShutdownWatchdog.HardExit(exitCode);
+            return exitCode;
+        }
+
+        private static int RunMain(string[] args)
+        {
             var mode = args.Length > 0 ? args[0] : "help";
             // probe のみ第2引数でレースキーを受け取る（例: probe 20260811-46-1R）。
             var arg = args.Length > 1 ? args[1] : null;
