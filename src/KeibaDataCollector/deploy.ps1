@@ -68,6 +68,9 @@ function Write-Step([string] $message) {
 Write-Step '実行中のタスクとプロセスを停止'
 foreach ($task in $AllTasks) {
     if (Get-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue) {
+        # 先に無効化する。止めた直後にトリガーが来て新しいプロセスが起動すると、
+        # exeがロックされてビルドが失敗する（実測 2026-10-13）。登録し直すと有効に戻る。
+        Disable-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue | Out-Null
         Stop-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue
         Write-Output "  停止要求: $task"
     }

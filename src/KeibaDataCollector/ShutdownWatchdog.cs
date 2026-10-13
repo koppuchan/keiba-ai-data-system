@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Threading;
 
 namespace KeibaDataCollector
@@ -26,6 +27,20 @@ namespace KeibaDataCollector
         /// <summary>後片付けにこれだけ待ってやり、過ぎたら強制的に終了させる。</summary>
         private static readonly TimeSpan GracePeriod = TimeSpan.FromSeconds(30);
 
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern IntPtr GetCurrentProcess();
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool TerminateProcess(IntPtr hProcess, uint exitCode);
+
+        /// <summary>OSにプロセスを即時終了させる（.NETの終了処理やCOMの後片付けを一切待たない）。
+        /// 失敗した場合だけ Process.Kill にフォールバックする。</summary>
+        private static void HardExit(int exitCode)
+        {
+            try { TerminateProcess(GetCurrentProcess(), (uint)exitCode); } catch { }
+            Process.GetCurrentProcess().Kill();
+        }
+
         /// <summary>Environment.Exit 自体も固まる場合に備えた二段目の猶予。</summary>
         private static readonly TimeSpan HardKillAfter = TimeSpan.FromSeconds(10);
 
@@ -38,12 +53,16 @@ namespace KeibaDataCollector
             new Thread(() =>
             {
                 Thread.Sleep(limit);
+
+                // メッセージの出力自体が固まっても終了できるよう、先に別スレッドで強制終了を仕掛けておく。
+                new Thread(() => { Thread.Sleep(HardKillAfter); HardExit(1); }) { IsBackground = true }.Start();
+
                 Console.WriteLine($"[watchdog] 処理が{limit.TotalMinutes:0}分以内に終わらなかったため、プロセスを終了します。" +
                                   "（JV-Link/UmaConnの応答待ちが原因の可能性）");
                 Console.Out.Flush();
-                new Thread(() => Environment.Exit(1)) { IsBackground = true }.Start();
-                Thread.Sleep(HardKillAfter);
-                Process.GetCurrentProcess().Kill();
+                // Environment.Exitを試さず、直接プロセスを終了させる。COM呼び出しで固まった状態では
+                // Exit/Killが効かず、プロセスが何時間も残ったことがあった（実測 2026-10-13）。
+                HardExit(1);
             })
             {
                 IsBackground = true,
@@ -72,7 +91,7 @@ namespace KeibaDataCollector
 
                 // Environment.Exit も終了ハンドラで固まりうるので、最後は問答無用で落とす。
                 Thread.Sleep(HardKillAfter);
-                Process.GetCurrentProcess().Kill();
+                HardExit(exitCode);
             })
             {
                 IsBackground = true,

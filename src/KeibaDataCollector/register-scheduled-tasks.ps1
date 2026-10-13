@@ -128,7 +128,12 @@ function Register-KeibaTask {
         [string] $Argument = '',
         # 指定すると、開始時刻から $RepeatFor の間、$RepeatEvery ごとに繰り返し実行する。
         [timespan] $RepeatEvery,
-        [timespan] $RepeatFor
+        [timespan] $RepeatFor,
+        # この時間を超えて動き続けたら、タスクスケジューラがプロセスごと強制終了する。
+        # JV-Link/UmaConnの応答待ちで固まったプロセスが何時間も残り、COMのロックと
+        # 多重起動禁止（IgnoreNew）のせいで以降の実行がすべて止まった（実測 2026-10-12/13）。
+        # 既定の20時間は、固まったまま丸1日止まる長さなので、タスクごとに短く指定する。
+        [timespan] $TimeLimit = (New-TimeSpan -Hours 20)
     )
 
     if ($Argument) {
@@ -166,7 +171,7 @@ function Register-KeibaTask {
         -StartWhenAvailable `
         -DontStopIfGoingOnBatteries `
         -AllowStartIfOnBatteries `
-        -ExecutionTimeLimit (New-TimeSpan -Hours 20)
+        -ExecutionTimeLimit $TimeLimit
 
     if ($RunOnlyWhenLoggedOn) {
         # 対話セッションで実行。ダイアログが出た場合に気づける。
@@ -210,38 +215,42 @@ Register-KeibaTask -TaskName "$TaskPrefix-BackfillIncremental" -BatPath $backfil
 
 Register-KeibaTask -TaskName "$TaskPrefix-Score" -BatPath $scoreBat -StartTime $ScoreTime `
     -Description '朝〜発走前〜レース間: 当日出走馬のAI指数を算出しscoresテーブルへ保存する（WordPressへは送らない。繰り返し。取消・騎手変更・馬場変更の再計算もこの再実行で反映される）' `
-    -RepeatEvery (New-TimeSpan -Minutes 20) -RepeatFor (New-TimeSpan -Hours 14)
+    -RepeatEvery (New-TimeSpan -Minutes 20) -RepeatFor (New-TimeSpan -Hours 14) -TimeLimit (New-TimeSpan -Minutes 45)
 
 Register-KeibaTask -TaskName "$TaskPrefix-TrendMorning" -BatPath $trendBat -StartTime $TrendMorningTime `
     -Argument 'morning' `
-    -Description '朝: 過去データ+当日確定の天候・馬場状態から事前想定傾向を算出する（1回のみ）'
+    -Description '朝: 過去データ+当日確定の天候・馬場状態から事前想定傾向を算出する（1回のみ）' `
+    -TimeLimit (New-TimeSpan -Minutes 100)
 
 Register-KeibaTask -TaskName "$TaskPrefix-TrendLive" -BatPath $trendBat -StartTime $TrendLiveTime `
     -Argument 'live' `
     -Description '開催中: ここまでの当日結果から現時点の傾向を算出する（繰り返し）' `
-    -RepeatEvery (New-TimeSpan -Minutes 30) -RepeatFor (New-TimeSpan -Hours 12)
+    -RepeatEvery (New-TimeSpan -Minutes 30) -RepeatFor (New-TimeSpan -Hours 12) -TimeLimit (New-TimeSpan -Minutes 45)
 
 Register-KeibaTask -TaskName "$TaskPrefix-Content" -BatPath $contentBat -StartTime $ContentTime `
     -Description '発走前〜レース間: 狙い馬・穴馬・危険な人気馬を生成・検証し、AI指数TOP5・傾向とまとめてWordPressへ公開する（繰り返し。Scoreの後に走るよう開始時刻をずらしてある。TrendFinal(21:30)の結果も公開できるよう23:40まで繰り返す）' `
-    -RepeatEvery (New-TimeSpan -Minutes 20) -RepeatFor (New-TimeSpan -Hours 16)
+    -RepeatEvery (New-TimeSpan -Minutes 20) -RepeatFor (New-TimeSpan -Hours 16) -TimeLimit (New-TimeSpan -Minutes 45)
 
 Register-KeibaTask -TaskName "$TaskPrefix-TrendFinal" -BatPath $trendBat -StartTime $TrendFinalTime `
     -Argument 'final' `
-    -Description '開催終了後: 全当日結果から本日の結果分析を算出する（1回のみ）'
+    -Description '開催終了後: 全当日結果から本日の結果分析を算出する（1回のみ）' `
+    -TimeLimit (New-TimeSpan -Minutes 100)
 
 Register-KeibaTask -TaskName "$TaskPrefix-Verify" -BatPath $verifyBat -StartTime $VerifyTime `
-    -Description '開催終了後: predictionsを確定着順と突き合わせ、verificationへ記録する（1回のみ）'
+    -Description '開催終了後: predictionsを確定着順と突き合わせ、verificationへ記録する（1回のみ）' `
+    -TimeLimit (New-TimeSpan -Minutes 100)
 
 Register-KeibaTask -TaskName "$TaskPrefix-Dashboard" -BatPath $dashboardBat -StartTime $DashboardTime `
     -Description '日中: 監視ダッシュボード（仕様書§17）をWordPressへ送信する（繰り返し）' `
-    -RepeatEvery (New-TimeSpan -Minutes 30) -RepeatFor (New-TimeSpan -Hours 15)
+    -RepeatEvery (New-TimeSpan -Minutes 30) -RepeatFor (New-TimeSpan -Hours 15) -TimeLimit (New-TimeSpan -Minutes 20)
 
 Register-KeibaTask -TaskName "$TaskPrefix-Backup" -BatPath $backupBat -StartTime $BackupTime `
-    -Description '深夜: historical.sqlite3のバックアップを作成する（直近14世代を保持）'
+    -Description '深夜: historical.sqlite3のバックアップを作成する（直近14世代を保持）' `
+    -TimeLimit (New-TimeSpan -Minutes 30)
 
 Register-KeibaTask -TaskName "$TaskPrefix-HealthCheck" -BatPath $healthBat -StartTime $HealthCheckTime `
     -Description '日中: AI指数算出・WordPress公開が60分以上止まっていないか確認し、止まっていればメール通知する（繰り返し）' `
-    -RepeatEvery (New-TimeSpan -Minutes 15) -RepeatFor (New-TimeSpan -Hours 14)
+    -RepeatEvery (New-TimeSpan -Minutes 15) -RepeatFor (New-TimeSpan -Hours 14) -TimeLimit (New-TimeSpan -Minutes 10)
 
 # 登録し直したことで停止したタスクを再開する。
 # ここを忘れると、日中に更新した日はその後のレースが反映されないまま終わる。
