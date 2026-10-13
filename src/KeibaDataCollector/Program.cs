@@ -667,7 +667,7 @@ namespace KeibaDataCollector
             try
             {
                 source.Initialize(AppConfig.JvLinkSoftwareId);
-                new FactorPublishService(source, scoring, scoresStore).RunForToday(targetDate);
+                new FactorPublishService(new CachingRaceSource(source), scoring, scoresStore).RunForToday(targetDate);
                 LogSuccess(source.SourceName, "AI指数算出", "正常終了");
             }
             catch (Exception ex)
@@ -683,7 +683,9 @@ namespace KeibaDataCollector
                 source.Initialize(AppConfig.JvLinkSoftwareId);
 
                 // 当日この開催場が無いソース（例: 地方開催が無い日のJV-Link）は0件で正常に終わる。
-                var venues = RaceDiscovery.ForDate(source, targetDate)
+                // 同じRACEデータを開催場ごとに読み直さず、1回の実行で1度だけ読む（CachingRaceSource）。
+                var cached = new CachingRaceSource(source);
+                var venues = RaceDiscovery.ForDate(cached, targetDate)
                     .Select(k => k.TrackCode).Distinct().ToList();
                 if (venues.Count == 0)
                 {
@@ -691,7 +693,7 @@ namespace KeibaDataCollector
                     return;
                 }
 
-                var engine = new TrendEngineService(source, historical, trendStore);
+                var engine = new TrendEngineService(cached, historical, trendStore);
                 foreach (var trackCode in venues)
                 {
                     var snapshot = engine.ComputeAndSave(targetDate, trackCode, stage);
@@ -717,7 +719,9 @@ namespace KeibaDataCollector
                 source.Initialize(AppConfig.JvLinkSoftwareId);
                 var isCentral = source.SourceName.Contains("中央");
 
-                var venues = RaceDiscovery.ForDate(source, targetDate)
+                // 同じRACEデータを開催場ごとに読み直さず、1回の実行で1度だけ読む（CachingRaceSource）。
+                var cached = new CachingRaceSource(source);
+                var venues = RaceDiscovery.ForDate(cached, targetDate)
                     .Select(k => k.TrackCode).Distinct().ToList();
                 if (venues.Count == 0)
                 {
@@ -725,7 +729,7 @@ namespace KeibaDataCollector
                     return;
                 }
 
-                var generator = new ContentGeneratorService(source, scoresStore);
+                var generator = new ContentGeneratorService(cached, scoresStore);
                 foreach (var trackCode in venues)
                 {
                     var picks = generator.GenerateForVenue(targetDate, trackCode);
@@ -826,7 +830,9 @@ namespace KeibaDataCollector
             {
                 source.Initialize(AppConfig.JvLinkSoftwareId);
 
-                var venues = RaceDiscovery.ForDate(source, targetDate)
+                // 同じRACEデータを開催場ごとに読み直さず、1回の実行で1度だけ読む（CachingRaceSource）。
+                var cached = new CachingRaceSource(source);
+                var venues = RaceDiscovery.ForDate(cached, targetDate)
                     .Select(k => k.TrackCode).Distinct().ToList();
                 if (venues.Count == 0)
                 {
@@ -834,7 +840,7 @@ namespace KeibaDataCollector
                     return;
                 }
 
-                var verifier = new VerificationService(source, predictionStore, verificationStore);
+                var verifier = new VerificationService(cached, predictionStore, verificationStore);
                 foreach (var trackCode in venues)
                 {
                     var summary = verifier.VerifyVenue(targetDate, trackCode);
