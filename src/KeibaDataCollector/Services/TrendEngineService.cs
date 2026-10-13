@@ -91,6 +91,7 @@ namespace KeibaDataCollector.Services
         private class TodayRace
         {
             public RaceKey Key;
+            public TimeSpan? StartTime;
             public string WeatherCode;
             public string TurfConditionCode;
             public string DirtConditionCode;
@@ -146,6 +147,7 @@ namespace KeibaDataCollector.Services
                             race = new TodayRace { Key = raceKey };
                             races[slug] = race;
                         }
+                        race.StartTime = ParseStartTime(Trim(ra.HassoTime));
                         race.WeatherCode = Trim(ra.TenkoBaba.TenkoCD);
                         race.TurfConditionCode = Trim(ra.TenkoBaba.SibaBabaCD);
                         race.DirtConditionCode = Trim(ra.TenkoBaba.DirtBabaCD);
@@ -197,8 +199,13 @@ namespace KeibaDataCollector.Services
         /// </summary>
         private void AddRealtimeResults(DateTime raceDate, string trackCode, List<TodayRace> races)
         {
+            // 発走前のレースに結果は無い。無駄に問い合わせて提供元へのアクセスを増やさないよう、
+            // 発走時刻（HHMM）から数分たつまで速報成績は取りに行かない（発走時刻が不明なレースは取りに行く）。
+            var earliestCheck = DateTime.Now - TimeSpan.FromMinutes(3);
             foreach (var race in races.Where(r => !r.IsFinished).OrderBy(r => r.Key.RaceNumber))
             {
+                if (race.StartTime.HasValue && raceDate.Date + race.StartTime.Value > earliestCheck) continue;
+
                 try
                 {
                     int rc = _source.OpenRealtime("0B12", new RaceKey
@@ -280,6 +287,13 @@ namespace KeibaDataCollector.Services
                         $"[{_source.SourceName}] {trackCode} {race.Key.RaceNumber}R の速報成績を取得できませんでした（このレースは集計に含めません）: {ex.Message}");
                 }
             }
+        }
+
+        private static TimeSpan? ParseStartTime(string hhmm)
+        {
+            if (hhmm.Length != 4 || !int.TryParse(hhmm, out var v)) return null;
+            int h = v / 100, m = v % 100;
+            return h <= 23 && m <= 59 ? (TimeSpan?)new TimeSpan(h, m, 0) : null;
         }
 
         private static bool HasCode(string code) => code.Length > 0 && code.Trim('0').Length > 0;
