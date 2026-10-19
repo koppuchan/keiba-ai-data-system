@@ -667,7 +667,7 @@ namespace KeibaDataCollector
             try
             {
                 source.Initialize(AppConfig.JvLinkSoftwareId);
-                new FactorPublishService(new CachingRaceSource(source), scoring, scoresStore).RunForToday(targetDate);
+                new FactorPublishService(new CachingRaceSource(source, targetDate), scoring, scoresStore).RunForToday(targetDate);
                 LogSuccess(source.SourceName, "AI指数算出", "正常終了");
             }
             catch (Exception ex)
@@ -684,7 +684,7 @@ namespace KeibaDataCollector
 
                 // 当日この開催場が無いソース（例: 地方開催が無い日のJV-Link）は0件で正常に終わる。
                 // 同じRACEデータを開催場ごとに読み直さず、1回の実行で1度だけ読む（CachingRaceSource）。
-                var cached = new CachingRaceSource(source);
+                var cached = new CachingRaceSource(source, targetDate);
                 var venues = RaceDiscovery.ForDate(cached, targetDate)
                     .Select(k => k.TrackCode).Distinct().ToList();
                 if (venues.Count == 0)
@@ -720,7 +720,7 @@ namespace KeibaDataCollector
                 var isCentral = source.SourceName.Contains("中央");
 
                 // 同じRACEデータを開催場ごとに読み直さず、1回の実行で1度だけ読む（CachingRaceSource）。
-                var cached = new CachingRaceSource(source);
+                var cached = new CachingRaceSource(source, targetDate);
                 var venues = RaceDiscovery.ForDate(cached, targetDate)
                     .Select(k => k.TrackCode).Distinct().ToList();
                 if (venues.Count == 0)
@@ -831,7 +831,7 @@ namespace KeibaDataCollector
                 source.Initialize(AppConfig.JvLinkSoftwareId);
 
                 // 同じRACEデータを開催場ごとに読み直さず、1回の実行で1度だけ読む（CachingRaceSource）。
-                var cached = new CachingRaceSource(source);
+                var cached = new CachingRaceSource(source, targetDate);
                 var venues = RaceDiscovery.ForDate(cached, targetDate)
                     .Select(k => k.TrackCode).Distinct().ToList();
                 if (venues.Count == 0)

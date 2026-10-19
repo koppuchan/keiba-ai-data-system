@@ -15,7 +15,11 @@ namespace KeibaDataCollector.Interop
     /// </summary>
     public sealed class CachingRaceSource : IRaceDataSource
     {
+        // 保持する上限（文字数）。これを超えるのは想定外のため、メモリ不足で落ちる前に明確なエラーにする。
+        private const long MaxCachedChars = 20000000;
+
         private readonly IRaceDataSource _inner;
+        private readonly string _targetDate;
 
         private OpenResult _cachedOpen;
         private List<string> _cachedRecords;
@@ -23,9 +27,14 @@ namespace KeibaDataCollector.Interop
         private bool _replaying;
         private int _replayIndex;
 
-        public CachingRaceSource(IRaceDataSource inner)
+        /// <param name="targetDate">対象日。この日のレコード（レースID中の開催年月日が一致するもの）だけ保持する。
+        /// 利用側（開催場列挙・AI指数・コンテンツ・傾向・検証）はどれも対象日以外を読み捨てているため、
+        /// 結果は変わらない。全期間を保持すると、32bitプロセスでUmaConnの全件がメモリに載りきらず、
+        /// OutOfMemoryで地方競馬の更新が10/14から止まった。</param>
+        public CachingRaceSource(IRaceDataSource inner, DateTime targetDate)
         {
             _inner = inner;
+            _targetDate = targetDate.ToString("yyyyMMdd");
         }
 
         public string SourceName => _inner.SourceName;
@@ -64,6 +73,7 @@ namespace KeibaDataCollector.Interop
         {
             var open = _inner.Open(dataSpec, fromTime, option);
             var records = new List<string>();
+            long cachedChars = 0;
             if (open.ReturnCode < 0)
             {
                 // -1（該当データ無し）等はそのまま呼び出し側に返す。呼び出し側がCloseする。
@@ -83,6 +93,14 @@ namespace KeibaDataCollector.Interop
                     if (size == -3) { Thread.Sleep(500); continue; }  // ダウンロード中
                     if (size < 0)
                         throw new InvalidOperationException($"{_inner.SourceName} Read failed: {size}");
+
+                    // レースID（レコード種別2＋データ区分1＋作成日8の次の、開催年4＋月日4）が対象日のものだけ残す。
+                    if (buffer.Length < 19 || string.CompareOrdinal(buffer, 11, _targetDate, 0, 8) != 0) continue;
+
+                    cachedChars += buffer.Length;
+                    if (cachedChars > MaxCachedChars)
+                        throw new InvalidOperationException(
+                            $"{_inner.SourceName} 対象日のRACEデータが想定より大きいため、読み込みを中止しました。");
                     records.Add(buffer);
                 }
             }
