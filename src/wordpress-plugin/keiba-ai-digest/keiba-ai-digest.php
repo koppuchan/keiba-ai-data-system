@@ -4,14 +4,14 @@
  * Description: KeibaDataCollector（JRAVAN+競馬最強の法則WEB 全自動AI競馬データシステム）から送られる
  *              AI指数TOP5・本日の傾向・狙い馬/穴馬/危険な人気馬を、開催場・日単位のカスタム投稿タイプ
  *              「keiba_digest」として受け取り、表示する。既存の Keiba Race Sync（race投稿）とは別。
- * Version: 0.5.1
+ * Version: 0.6.0
  */
 
 if (!defined('ABSPATH')) {
     exit;
 }
 
-define('KEIBA_AI_DIGEST_VERSION', '0.5.1');
+define('KEIBA_AI_DIGEST_VERSION', '0.6.0');
 define('KEIBA_AI_DIGEST_JSON_META_KEYS', array(
     'ai_index_top5',
     'trend_morning',
@@ -253,10 +253,12 @@ function keiba_ai_digest_render_settings_page()
 
     if (isset($_POST['keiba_ai_digest_nonce']) && wp_verify_nonce($_POST['keiba_ai_digest_nonce'], 'keiba_ai_digest_settings')) {
         update_option('keiba_ai_digest_auto_publish_enabled', isset($_POST['auto_publish_enabled']));
+        update_option('keiba_ai_digest_cta_enabled', isset($_POST['cta_enabled']));
         echo '<div class="notice notice-success"><p>保存しました。</p></div>';
     }
 
     $enabled = (bool) get_option('keiba_ai_digest_auto_publish_enabled', false);
+    $cta_enabled = keiba_ai_digest_cta_enabled();
     ?>
     <div class="wrap">
         <h1>Keiba AI Digest 設定</h1>
@@ -274,6 +276,15 @@ function keiba_ai_digest_render_settings_page()
                         <label>
                             <input type="checkbox" name="auto_publish_enabled" value="1" <?php checked($enabled); ?> />
                             AI指数・傾向・狙い目の自動公開を有効にする
+                        </label>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row">ジェネレーターとの相互リンク</th>
+                    <td>
+                        <label>
+                            <input type="checkbox" name="cta_enabled" value="1" <?php checked($cta_enabled); ?> />
+                            スマートAI予想ジェネレーターのページへの誘導バナーと、ダイジェスト側の「ジェネレーターで分析する」ボタンを表示する
                         </label>
                     </td>
                 </tr>
@@ -349,7 +360,7 @@ function keiba_ai_digest_render_status()
  * ------------------------------------------------------------------------- */
 
 add_action('wp_enqueue_scripts', function () {
-    if (is_singular('keiba_digest')) {
+    if (is_singular('keiba_digest') || is_post_type_archive('keiba_digest') || is_page('smartaigenerator')) {
         wp_enqueue_style(
             'keiba-ai-digest',
             plugins_url('assets/keiba-ai-digest.css', __FILE__),
@@ -363,8 +374,88 @@ add_filter('the_content', function ($content) {
     if (!is_singular('keiba_digest') || !in_the_loop() || !is_main_query()) {
         return $content;
     }
-    return $content . keiba_ai_digest_render_digest(get_the_ID());
+    return $content . keiba_ai_digest_render_digest(get_the_ID()) . keiba_ai_digest_render_generator_button();
 }, 10);
+
+/* -------------------------------------------------------------------------
+ * スマートAI予想ジェネレーターとの相互リンク（表示を足すだけ。AI指数の計算・記事の自動生成・
+ * ジェネレーター本体には手を入れない）。設定 → Keiba AI Digest で表示のON/OFFを切り替えられる。
+ * ------------------------------------------------------------------------- */
+
+define('KEIBA_AI_DIGEST_GENERATOR_PATH', '/smartaigenerator/');
+define('KEIBA_AI_DIGEST_BANNER_ALT', 'どのレースを選べばいいか迷ったら？本日のAI注目馬・AI指数TOP5・狙い馬・穴馬をチェック！AI指数ダイジェストはこちら');
+define('KEIBA_AI_DIGEST_BUTTON_TEXT', 'スマートAI予想ジェネレーターでレースを分析する →');
+
+function keiba_ai_digest_cta_enabled()
+{
+    return (bool) get_option('keiba_ai_digest_cta_enabled', true);
+}
+
+/** ジェネレーター側に置く、AI指数ダイジェストへの誘導バナー（別タブで開く）。 */
+function keiba_ai_digest_render_digest_banner()
+{
+    $link = get_post_type_archive_link('keiba_digest');
+    if (!$link) {
+        $link = home_url('/ai-digest/');
+    }
+    $base = plugins_url('assets/', __FILE__);
+
+    return '<div class="keiba-ai-digest-banner">'
+        . '<a href="' . esc_url($link) . '" target="_blank" rel="noopener">'
+        . '<img src="' . esc_url($base . 'ai-digest-banner.jpg') . '"'
+        . ' srcset="' . esc_url($base . 'ai-digest-banner-1000.jpg') . ' 1000w, '
+        . esc_url($base . 'ai-digest-banner.jpg') . ' 1774w"'
+        . ' sizes="(max-width: 800px) 100vw, 800px"'
+        . ' width="1774" height="887" loading="lazy"'
+        . ' alt="' . esc_attr(KEIBA_AI_DIGEST_BANNER_ALT) . '" />'
+        . '</a></div>';
+}
+
+/** ダイジェスト側に置く、スマートAI予想ジェネレーターへの文字ボタン（別タブで開く）。 */
+function keiba_ai_digest_render_generator_button()
+{
+    if (!keiba_ai_digest_cta_enabled()) {
+        return '';
+    }
+    return '<p class="keiba-ai-digest-cta"><a class="keiba-ai-digest-cta-button" href="'
+        . esc_url(home_url(KEIBA_AI_DIGEST_GENERATOR_PATH)) . '" target="_blank" rel="noopener">'
+        . esc_html(KEIBA_AI_DIGEST_BUTTON_TEXT) . '</a></p>';
+}
+
+/**
+ * ジェネレーターのページ（別プラグインが生成）の「まずは1レース完全無料」の説明と
+ * 「STEP 1」の間（= id="hrc-step1" の要素の直前）にバナーを差し込む。
+ * ショートコード等が展開された後の本文に対して行うため、フィルタの優先度を最後にしている。
+ * 目印が見つからない場合（相手側の構造が変わった場合）は何も差し込まず、ページはそのまま表示される。
+ */
+add_filter('the_content', function ($content) {
+    if (!keiba_ai_digest_cta_enabled() || !is_page('smartaigenerator') || !in_the_loop() || !is_main_query()) {
+        return $content;
+    }
+    if (strpos($content, 'keiba-ai-digest-banner') !== false) {
+        return $content;
+    }
+    $banner = keiba_ai_digest_render_digest_banner();
+    $result = preg_replace_callback(
+        '/<[a-z][^>]*\bid=["\']hrc-step1["\'][^>]*>/i',
+        function ($m) use ($banner) {
+            return $banner . $m[0];
+        },
+        $content,
+        1
+    );
+    return $result === null ? $content : $result;
+}, PHP_INT_MAX);
+
+/** 一覧ページ（/ai-digest/）の記事一覧の上部に、ジェネレーターへの文字ボタンを出す。 */
+add_action('loop_start', function ($query) {
+    static $done = false;
+    if ($done || !$query->is_main_query() || !is_post_type_archive('keiba_digest') || !keiba_ai_digest_cta_enabled()) {
+        return;
+    }
+    $done = true;
+    echo keiba_ai_digest_render_generator_button();
+});
 
 function keiba_ai_digest_decode_meta($post_id, $meta_key)
 {
