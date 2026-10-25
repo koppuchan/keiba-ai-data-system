@@ -55,9 +55,14 @@
         try {
             if (typeof window.gtag === 'function') {
                 window.gtag('event', gaName, { event_category: 'diagnosis' });
+            } else {
+                // WP Rocket等でGA4のタグの読み込みが遅らされている場合に備え、gtag形式（arguments）でキューへ積む。
+                // タグが読み込まれた時点で順に処理される。
+                window.dataLayer = window.dataLayer || [];
+                (function () { window.dataLayer.push(arguments); })('event', gaName, { event_category: 'diagnosis' });
             }
             if (window.dataLayer && typeof window.dataLayer.push === 'function') {
-                window.dataLayer.push({ event: gaName });
+                window.dataLayer.push({ event: gaName }); // Googleタグマネージャー用
             }
         } catch (e) { /* 計測の失敗で診断を止めない */ }
 
