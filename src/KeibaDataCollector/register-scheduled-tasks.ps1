@@ -7,12 +7,9 @@
     "KeibaAiDataSystem-*"（-TaskPrefixで変更可）。
 
       KeibaAiDataSystem-BackfillIncremental   : 毎日 -BackfillTime             に scheduled-backfill.bat incremental（深夜）
-      KeibaAiDataSystem-Score                 : 毎日 -ScoreTime               から繰り返し scheduled-score.bat（朝〜発走前〜レース間）
-      KeibaAiDataSystem-TrendMorning          : 毎日 -TrendMorningTime        に scheduled-trend.bat morning（朝）
-      KeibaAiDataSystem-TrendLive             : 毎日 -TrendLiveTime           から繰り返し scheduled-trend.bat live（開催中）
-      KeibaAiDataSystem-Content                : 毎日 -ContentTime            から繰り返し scheduled-content.bat（発走前〜レース間）
-      KeibaAiDataSystem-TrendFinal            : 毎日 -TrendFinalTime          に scheduled-trend.bat final（開催終了後）
-      KeibaAiDataSystem-Verify                : 毎日 -VerifyTime              に scheduled-verify.bat（開催終了後）
+      KeibaAiDataSystem-CycleCentral          : 毎日 -CycleCentralTime        から20分ごと scheduled-cycle.bat jv（中央競馬: AI指数→傾向→公開を1プロセスで順に実行）
+      KeibaAiDataSystem-CycleLocal            : 毎日 -CycleLocalTime          から20分ごと scheduled-cycle.bat uma（地方競馬: 同上）
+      KeibaAiDataSystem-Verify                : 毎日 -VerifyTime              に scheduled-verify.bat（開催終了後。地方の最終サイクルと重ならない時刻）
       KeibaAiDataSystem-HealthCheck           : 毎日 -HealthCheckTime         から15分ごとに scheduled-healthcheck.bat（更新停止の検知・通知）
       KeibaAiDataSystem-Backup                : 毎日 -BackupTime              に scheduled-backup.bat（深夜、DBバックアップ）
       KeibaAiDataSystem-Dashboard             : 毎日 -DashboardTime           から繰り返し scheduled-dashboard.bat（日中）
@@ -72,15 +69,14 @@ param(
     [string] $TaskPrefix = 'KeibaAiDataSystem',
     # 以下、仕様書§12対応のタスクの時刻。深夜→朝→発走前/レース間→開催終了後、の順。
     [string] $BackfillTime = '02:00',
-    [string] $ScoreTime = '07:30',
-    [string] $TrendMorningTime = '07:45',
-    [string] $TrendLiveTime = '09:00',
-    [string] $ContentTime = '07:40',
-    [string] $TrendFinalTime = '21:30',
-    [string] $VerifyTime = '22:00',
-    [string] $DashboardTime = '07:00',
+    # 中央と地方は別々のタスク（別のCOM・別のロック）。10分ずらして、JV-Link/UmaConnの初期化が重ならないようにする。
+    # どれも20分間隔のため、5の倍数の分を避け、同じVPSの既存システム（15分・10分ごと）と起動が重ならないようにする。
+    [string] $CycleCentralTime = '07:32',
+    [string] $CycleLocalTime = '07:42',
+    [string] $VerifyTime = '22:12',
+    [string] $DashboardTime = '07:17',
     [string] $BackupTime = '01:30',
-    [string] $HealthCheckTime = '08:30',
+    [string] $HealthCheckTime = '08:38',
     [switch] $RunOnlyWhenLoggedOn = $true
 )
 
@@ -91,9 +87,7 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $script:TasksToResume = @()
 
 $backfillBat = Join-Path $scriptDir 'scheduled-backfill.bat'
-$scoreBat = Join-Path $scriptDir 'scheduled-score.bat'
-$trendBat = Join-Path $scriptDir 'scheduled-trend.bat'
-$contentBat = Join-Path $scriptDir 'scheduled-content.bat'
+$cycleBat = Join-Path $scriptDir 'scheduled-cycle.bat'
 $verifyBat = Join-Path $scriptDir 'scheduled-verify.bat'
 $dashboardBat = Join-Path $scriptDir 'scheduled-dashboard.bat'
 $backupBat = Join-Path $scriptDir 'scheduled-backup.bat'
@@ -102,7 +96,7 @@ $exePath = Join-Path $scriptDir 'bin\Debug\net48\KeibaDataCollector.exe'
 $secrets = Join-Path $scriptDir 'secrets.local.bat'
 
 # --- 事前チェック ------------------------------------------------------------
-foreach ($required in @($backfillBat, $scoreBat, $trendBat, $contentBat, $verifyBat, $dashboardBat, $backupBat, $healthBat, $exePath)) {
+foreach ($required in @($backfillBat, $cycleBat, $verifyBat, $dashboardBat, $backupBat, $healthBat, $exePath)) {
     if (-not (Test-Path $required)) {
         throw "必要なファイルが見つかりません: $required`nビルド済みか確認してください（dotnet build -c Debug）。"
     }
@@ -213,28 +207,15 @@ function Register-KeibaTask {
 Register-KeibaTask -TaskName "$TaskPrefix-BackfillIncremental" -BatPath $backfillBat -StartTime $BackfillTime `
     -Description '深夜: 6ファクター/AI指数用の履歴データを差分取得する（option=Normal、ダイアログ無し）'
 
-Register-KeibaTask -TaskName "$TaskPrefix-Score" -BatPath $scoreBat -StartTime $ScoreTime `
-    -Description '朝〜発走前〜レース間: 当日出走馬のAI指数を算出しscoresテーブルへ保存する（WordPressへは送らない。繰り返し。取消・騎手変更・馬場変更の再計算もこの再実行で反映される）' `
-    -RepeatEvery (New-TimeSpan -Minutes 20) -RepeatFor (New-TimeSpan -Hours 14) -TimeLimit (New-TimeSpan -Minutes 45)
+Register-KeibaTask -TaskName "$TaskPrefix-CycleCentral" -BatPath $cycleBat -StartTime $CycleCentralTime `
+    -Argument 'jv' `
+    -Description '中央競馬: AI指数の算出→本日の傾向（朝・開催中・終了後）→WordPress公開を、1つのプロセスで順に実行する（20分ごと。中央の開催時間帯のみ）' `
+    -RepeatEvery (New-TimeSpan -Minutes 20) -RepeatFor (New-TimeSpan -Hours 12) -TimeLimit (New-TimeSpan -Minutes 45)
 
-Register-KeibaTask -TaskName "$TaskPrefix-TrendMorning" -BatPath $trendBat -StartTime $TrendMorningTime `
-    -Argument 'morning' `
-    -Description '朝: 過去データ+当日確定の天候・馬場状態から事前想定傾向を算出する（1回のみ）' `
-    -TimeLimit (New-TimeSpan -Minutes 100)
-
-Register-KeibaTask -TaskName "$TaskPrefix-TrendLive" -BatPath $trendBat -StartTime $TrendLiveTime `
-    -Argument 'live' `
-    -Description '開催中: ここまでの当日結果から現時点の傾向を算出する（繰り返し）' `
-    -RepeatEvery (New-TimeSpan -Minutes 30) -RepeatFor (New-TimeSpan -Hours 12) -TimeLimit (New-TimeSpan -Minutes 45)
-
-Register-KeibaTask -TaskName "$TaskPrefix-Content" -BatPath $contentBat -StartTime $ContentTime `
-    -Description '発走前〜レース間: 狙い馬・穴馬・危険な人気馬を生成・検証し、AI指数TOP5・傾向とまとめてWordPressへ公開する（繰り返し。Scoreの後に走るよう開始時刻をずらしてある。TrendFinal(21:30)の結果も公開できるよう23:40まで繰り返す）' `
+Register-KeibaTask -TaskName "$TaskPrefix-CycleLocal" -BatPath $cycleBat -StartTime $CycleLocalTime `
+    -Argument 'uma' `
+    -Description '地方競馬: AI指数の算出→本日の傾向（朝・開催中・終了後）→WordPress公開を、1つのプロセスで順に実行する（20分ごと。ナイター終了後まで）' `
     -RepeatEvery (New-TimeSpan -Minutes 20) -RepeatFor (New-TimeSpan -Hours 16) -TimeLimit (New-TimeSpan -Minutes 45)
-
-Register-KeibaTask -TaskName "$TaskPrefix-TrendFinal" -BatPath $trendBat -StartTime $TrendFinalTime `
-    -Argument 'final' `
-    -Description '開催終了後: 全当日結果から本日の結果分析を算出する（1回のみ）' `
-    -TimeLimit (New-TimeSpan -Minutes 100)
 
 Register-KeibaTask -TaskName "$TaskPrefix-Verify" -BatPath $verifyBat -StartTime $VerifyTime `
     -Description '開催終了後: predictionsを確定着順と突き合わせ、verificationへ記録する（1回のみ）' `
@@ -242,7 +223,7 @@ Register-KeibaTask -TaskName "$TaskPrefix-Verify" -BatPath $verifyBat -StartTime
 
 Register-KeibaTask -TaskName "$TaskPrefix-Dashboard" -BatPath $dashboardBat -StartTime $DashboardTime `
     -Description '日中: 監視ダッシュボード（仕様書§17）をWordPressへ送信する（繰り返し）' `
-    -RepeatEvery (New-TimeSpan -Minutes 30) -RepeatFor (New-TimeSpan -Hours 15) -TimeLimit (New-TimeSpan -Minutes 20)
+    -RepeatEvery (New-TimeSpan -Minutes 60) -RepeatFor (New-TimeSpan -Hours 15) -TimeLimit (New-TimeSpan -Minutes 20)
 
 Register-KeibaTask -TaskName "$TaskPrefix-Backup" -BatPath $backupBat -StartTime $BackupTime `
     -Description '深夜: historical.sqlite3のバックアップを作成する（直近14世代を保持）' `
@@ -251,6 +232,19 @@ Register-KeibaTask -TaskName "$TaskPrefix-Backup" -BatPath $backupBat -StartTime
 Register-KeibaTask -TaskName "$TaskPrefix-HealthCheck" -BatPath $healthBat -StartTime $HealthCheckTime `
     -Description '日中: AI指数算出・WordPress公開が60分以上止まっていないか確認し、止まっていればメール通知する（繰り返し）' `
     -RepeatEvery (New-TimeSpan -Minutes 15) -RepeatFor (New-TimeSpan -Hours 14) -TimeLimit (New-TimeSpan -Minutes 10)
+
+# 以前は Score / TrendMorning / TrendLive / Content / TrendFinal を別々のタスクで動かしていたが、
+# 時刻が重なって順番待ち・見送りが起きたため、CycleCentral / CycleLocal にまとめた。古いタスクが
+# 残っていると二重に動くので、このシステムの名前のものだけ止めて削除する（既存システムのタスクには触れない）。
+foreach ($obsolete in @('Score', 'TrendMorning', 'TrendLive', 'Content', 'TrendFinal')) {
+    $obsoleteName = "$TaskPrefix-$obsolete"
+    if (Get-ScheduledTask -TaskName $obsoleteName -ErrorAction SilentlyContinue) {
+        Stop-ScheduledTask -TaskName $obsoleteName -ErrorAction SilentlyContinue
+        Unregister-ScheduledTask -TaskName $obsoleteName -Confirm:$false
+        Write-Output "古いタスクを削除しました: $obsoleteName"
+        $script:TasksToResume = @($script:TasksToResume | Where-Object { $_ -ne $obsoleteName })
+    }
+}
 
 # 登録し直したことで停止したタスクを再開する。
 # ここを忘れると、日中に更新した日はその後のレースが反映されないまま終わる。

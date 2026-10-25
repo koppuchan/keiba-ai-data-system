@@ -67,6 +67,8 @@ namespace KeibaDataCollector.Interop
         /// </summary>
         public void Initialize(string softwareId)
         {
+            // 1回の実行（cycle）の中で score→trend→content が続けて呼ぶため、初期化は1度だけにする。
+            if (_initialized) return;
             EnsureComObject();
 
             for (int attempt = 1; ; attempt++)
@@ -93,7 +95,10 @@ namespace KeibaDataCollector.Interop
             }
 
             SuppressPayoutDialog();
+            _initialized = true;
         }
+
+        private bool _initialized;
 
         /// <summary>後期バインド(InvokeMember)経由のCOM例外はTargetInvocationExceptionに包まれて
         /// 飛んでくるため、内側を辿ってCOMExceptionかどうかを判定する。

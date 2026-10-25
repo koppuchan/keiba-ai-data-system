@@ -116,19 +116,21 @@ powershell -ExecutionPolicy Bypass -File .\register-scheduled-tasks.ps1
 
 | タスク | 既定時刻 | 内容 |
 | --- | --- | --- |
-| `KeibaAiDataSystem-HealthCheck` | 08:30〜（15分毎/14時間） | 更新停止の検知・メール通知 |
+| `KeibaAiDataSystem-CycleCentral` | 07:32〜（20分毎/12時間） | 中央競馬: AI指数算出 → 傾向（朝・開催中・終了後）→ WordPress公開を、1プロセスで順に実行（`cycle jv`） |
+| `KeibaAiDataSystem-CycleLocal` | 07:42〜（20分毎/16時間） | 地方競馬: 同上（`cycle uma`）。中央と10分ずらし、COMの初期化が重ならないようにしている |
+| `KeibaAiDataSystem-Verify` | 22:12（1回） | 開催終了後: レース後検証（地方の最終サイクルと重ならない時刻） |
+| `KeibaAiDataSystem-HealthCheck` | 08:38〜（15分毎/14時間） | 更新停止の検知・メール通知（COMを使わない） |
+| `KeibaAiDataSystem-Dashboard` | 07:17〜（60分毎/15時間） | 日中: 監視ダッシュボードのWordPress送信（COMを使わない） |
 | `KeibaAiDataSystem-Backup` | 01:30（1回） | 深夜: DBのバックアップ（仕様書§12） |
 | `KeibaAiDataSystem-BackfillIncremental` | 02:00（1回） | 深夜: 履歴データの差分取得 |
-| `KeibaAiDataSystem-Morning` | 07:00（1回） | 早朝: 当日の出走表取得 |
-| `KeibaAiDataSystem-Score` | 07:30〜（20分毎/14時間） | 朝〜発走前〜レース間: AI指数算出 |
-| `KeibaAiDataSystem-TrendMorning` | 07:45（1回） | 朝: 事前想定傾向 |
-| `KeibaAiDataSystem-Content` | 07:40〜（20分毎/14時間） | 発走前〜レース間: 狙い馬・穴馬・危険な人気馬の生成・検証・公開（Scoreの後に走るようずらしてある） |
-| `KeibaAiDataSystem-Predict` | 09:00〜（15分毎/12時間） | 予想印の生成 |
-| `KeibaAiDataSystem-TrendLive` | 09:00〜（30分毎/12時間） | 開催中: 現時点の傾向 |
-| `KeibaAiDataSystem-Watch` | 09:30（1回、全確定で自動終了） | レース間: 結果・払戻監視 |
-| `KeibaAiDataSystem-Dashboard` | 07:00〜（30分毎/15時間） | 日中: 監視ダッシュボードのWordPress送信 |
-| `KeibaAiDataSystem-TrendFinal` | 21:30（1回） | 開催終了後: 本日の結果分析 |
-| `KeibaAiDataSystem-Verify` | 22:00（1回） | 開催終了後: レース後検証 |
+
+**重ならない作り**: 以前は Score / Content / Trend* を別々のタスクにしていたため、同じ時刻に重なって順番待ち・見送りが
+起き、同じRACEデータを何度も読み直していた。`cycle` は1つのソースの score → trend → content を1つのプロセスで
+順に実行し、初期化とRACEの読み込みを1回に共有する。JV-Link用とUmaConn用は別のロック（別のCOM）で、
+片方が固まってももう片方は止まらない。ロックはソース単位（`Global\KeibaAiDataSystem-ComAccess-JV` / `-NV`）で、
+両方を使う `verify` / `backfill` は両方を取る。傾向は、朝は未保存のときだけ、開催中は9時以降、終了後は20:30以降に計算する。
+`register-scheduled-tasks.ps1` は、以前の `Score` / `TrendMorning` / `TrendLive` / `Content` / `TrendFinal` タスクが
+残っていれば（このシステムの名前のものだけ）削除する。`score` / `content` / `trend` コマンド自体は、手動の再実行用に残している。
 
 「前日夜: 翌日開催場・出走予定を準備」（仕様書§12）に対応する専用タスクは意図的に作っていない
 （`morning`は当日分を早朝に取得すれば間に合う設計のため。詳細はスクリプト冒頭のコメント参照）。
