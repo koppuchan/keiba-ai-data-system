@@ -322,6 +322,20 @@ function keiba_diag_detail($race)
     return $rows;
 }
 
+/**
+ * ダイジェストのデータが新しいか。収集アプリは20分ごとに更新するため、最後の更新から一定時間
+ * （既定60分）たったデータは使わない。開催中止や収集アプリの停止で古いデータが残っていても、
+ * 終わったレースや中止のレースを推薦しないための安全策。更新時刻が読めない場合は古いものとして扱う。
+ */
+function keiba_diag_is_fresh($updated_at, $now_timestamp, $max_minutes = 60)
+{
+    $ts = strtotime((string) $updated_at);
+    if ($ts === false || $ts <= 0) {
+        return false;
+    }
+    return ($now_timestamp - $ts) <= $max_minutes * 60;
+}
+
 /** 流入元の分類（x / youtube / search / site / direct / other）。UTMがあればそれを優先し、無ければリファラのホスト名で判定する。 */
 function keiba_diag_classify_source($utm_source, $referrer_host, $own_host)
 {
@@ -453,6 +467,9 @@ function keiba_diag_load_races()
     foreach ($posts as $post) {
         if (!get_post_meta($post->ID, 'license_visible', true)) {
             continue;
+        }
+        if (!keiba_diag_is_fresh(get_post_meta($post->ID, 'updated_at', true), time())) {
+            continue; // 更新が止まっている開催場（中止・収集の停止など）は推薦しない。
         }
         $track_code = (string) get_post_meta($post->ID, 'track_code', true);
         $raw = get_post_meta($post->ID, 'races', true);

@@ -246,6 +246,7 @@
         if (data.relaxed) {
             head.appendChild(el('p', 'kdg-note', '人気の条件に合うレースがなかったため、人気の条件を外してお選びしています。'));
         }
+        head.appendChild(el('p', 'kdg-note', '注目度の目安：AI指数・要素別評価（偏差値、平均50）をもとに、S＝60以上、A＝55以上、B＝50以上です。'));
         wrap.appendChild(head);
 
         var details = [];
