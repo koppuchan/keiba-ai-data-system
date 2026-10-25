@@ -772,7 +772,7 @@ namespace KeibaDataCollector
                     try
                     {
                         var publishOutcome = publisher
-                            .PublishAsync(targetDate, trackCode, isCentral, top5, trendMorning, trendLive, trendFinal, validated)
+                            .PublishAsync(targetDate, trackCode, isCentral, top5, trendMorning, trendLive, trendFinal, validated, generator.LastRaceSummaries)
                             .GetAwaiter().GetResult();
 
                         Console.WriteLine(publishOutcome.WasPublished

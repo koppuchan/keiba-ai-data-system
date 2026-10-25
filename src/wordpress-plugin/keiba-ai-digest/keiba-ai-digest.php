@@ -4,20 +4,23 @@
  * Description: KeibaDataCollector（JRAVAN+競馬最強の法則WEB 全自動AI競馬データシステム）から送られる
  *              AI指数TOP5・本日の傾向・狙い馬/穴馬/危険な人気馬を、開催場・日単位のカスタム投稿タイプ
  *              「keiba_digest」として受け取り、表示する。既存の Keiba Race Sync（race投稿）とは別。
- * Version: 0.6.0
+ * Version: 0.7.0
  */
 
 if (!defined('ABSPATH')) {
     exit;
 }
 
-define('KEIBA_AI_DIGEST_VERSION', '0.6.0');
+define('KEIBA_AI_DIGEST_VERSION', '0.7.0');
+
+require_once __DIR__ . '/includes/diagnosis.php';
 define('KEIBA_AI_DIGEST_JSON_META_KEYS', array(
     'ai_index_top5',
     'trend_morning',
     'trend_live',
     'trend_final',
     'picks',
+    'races',
 ));
 
 /**
@@ -297,6 +300,8 @@ function keiba_ai_digest_render_settings_page()
             <code>run-score.bat</code> / <code>run-content.bat</code> を対象日を指定して再実行してください。
             このプラグインからVPS上の処理を起動する経路は用意していません。
         </p>
+
+        <?php keiba_ai_digest_render_diagnosis_admin(); ?>
 
         <h2>監視ダッシュボード（仕様書§17）</h2>
         <?php keiba_ai_digest_render_status(); ?>

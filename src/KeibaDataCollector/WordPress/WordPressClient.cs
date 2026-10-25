@@ -334,6 +334,7 @@ namespace KeibaDataCollector.WordPress
                     trend_live = payload.TrendLive != null ? JsonConvert.SerializeObject(payload.TrendLive, CamelCaseSettings) : "",
                     trend_final = payload.TrendFinal != null ? JsonConvert.SerializeObject(payload.TrendFinal, CamelCaseSettings) : "",
                     picks = JsonConvert.SerializeObject(payload.Picks, CamelCaseSettings),
+                    races = JsonConvert.SerializeObject(payload.Races, CamelCaseSettings),
                     license_visible = payload.LicenseVisible ? "1" : "0",
                     updated_at = DateTime.UtcNow.ToString("o"),
                 }

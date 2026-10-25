@@ -40,7 +40,8 @@ namespace KeibaDataCollector.Services
             VenueTrendSnapshot trendMorning,
             VenueTrendSnapshot trendLive,
             VenueTrendSnapshot trendFinal,
-            List<(GeneratedPick Pick, ValidationOutcome Outcome)> validatedPicks)
+            List<(GeneratedPick Pick, ValidationOutcome Outcome)> validatedPicks,
+            List<RaceSummary> races = null)
         {
             var licenseVisible = _licenseGate.IsWebPublishAllowed(trackCode, isCentral);
             if (!licenseVisible)
@@ -61,6 +62,7 @@ namespace KeibaDataCollector.Services
                 TrendLive = trendLive,
                 TrendFinal = trendFinal,
                 Picks = passedPicks,
+                Races = FilterRacesToPassedPicks(races, passedPicks),
                 LicenseVisible = true,
             };
 
@@ -82,6 +84,25 @@ namespace KeibaDataCollector.Services
             return published
                 ? PublishOutcome.Published(passedPicks.Count, blockedCount)
                 : PublishOutcome.Skipped("送信条件を満たさず見送りました。");
+        }
+
+        /// <summary>Validatorを通らなかった公開停止のピックは、レース要約の役割（狙い馬等）からも外す
+        /// （停止したはずの馬が診断側で「狙い馬」として出ないようにする）。</summary>
+        private static List<RaceSummary> FilterRacesToPassedPicks(List<RaceSummary> races, List<GeneratedPick> passedPicks)
+        {
+            if (races == null) return new List<RaceSummary>();
+            foreach (var race in races)
+            {
+                foreach (var c in race.Candidates)
+                {
+                    c.Roles = c.Roles
+                        .Where(role => passedPicks.Any(p => p.Race.RaceNumber == race.RaceNumber
+                                                          && p.Umaban == c.Umaban
+                                                          && p.Category.ToString().ToLowerInvariant() == role))
+                        .ToList();
+                }
+            }
+            return races;
         }
 
         private void SnapshotAiIndexTop5(AiIndexResult t, bool licenseVisible)
