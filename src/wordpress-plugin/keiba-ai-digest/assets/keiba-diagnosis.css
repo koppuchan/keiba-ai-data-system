@@ -1,0 +1,219 @@
+/* 今日の狙い目レース診断（スマホ優先） */
+.keiba-diagnosis {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 0 0 2em;
+    font-size: 16px;
+    line-height: 1.6;
+}
+
+.keiba-diagnosis .kdg-card {
+    margin: 0 0 1em;
+    padding: 1.2em 1em;
+    border: 1px solid #d9e2ec;
+    border-radius: 10px;
+    background: #fff;
+    box-sizing: border-box;
+}
+
+.keiba-diagnosis .kdg-catch {
+    margin: 0 0 0.3em;
+    font-size: 0.9em;
+    font-weight: bold;
+    color: #1565c0;
+}
+
+.keiba-diagnosis .kdg-title,
+.keiba-diagnosis .kdg-question {
+    margin: 0 0 0.6em;
+    padding: 0;
+    border: 0;
+    font-size: 1.35em;
+    line-height: 1.4;
+}
+
+.keiba-diagnosis .kdg-lead {
+    margin: 0 0 1em;
+}
+
+.keiba-diagnosis .kdg-note,
+.keiba-diagnosis .kdg-disclaimer {
+    margin: 0.8em 0 0;
+    font-size: 0.85em;
+    color: #555;
+}
+
+.keiba-diagnosis .kdg-btn {
+    display: block;
+    width: 100%;
+    min-height: 56px;
+    margin: 0 0 0.7em;
+    padding: 0.8em 1em;
+    border: 2px solid #1565c0;
+    border-radius: 8px;
+    background: #fff;
+    color: #1565c0;
+    font-size: 1.05em;
+    font-weight: bold;
+    line-height: 1.4;
+    text-align: center;
+    text-decoration: none;
+    cursor: pointer;
+    box-sizing: border-box;
+    -webkit-appearance: none;
+    appearance: none;
+}
+
+.keiba-diagnosis .kdg-btn:hover,
+.keiba-diagnosis .kdg-btn:focus {
+    background: #e3f2fd;
+}
+
+.keiba-diagnosis .kdg-btn-primary {
+    background: #1565c0;
+    color: #fff;
+}
+
+.keiba-diagnosis .kdg-btn-primary:hover,
+.keiba-diagnosis .kdg-btn-primary:focus {
+    background: #0d47a1;
+    color: #fff;
+}
+
+.keiba-diagnosis .kdg-btn-line {
+    border-color: #06a63d;
+    background: #06c755;
+    color: #fff;
+}
+
+.keiba-diagnosis .kdg-btn-line:hover,
+.keiba-diagnosis .kdg-btn-line:focus {
+    background: #05a548;
+    color: #fff;
+}
+
+.keiba-diagnosis .kdg-btn-secondary {
+    border-color: #607d8b;
+    color: #37474f;
+}
+
+.keiba-diagnosis .kdg-btn-link {
+    min-height: 44px;
+    border: 0;
+    background: transparent;
+    font-weight: normal;
+    text-decoration: underline;
+}
+
+.keiba-diagnosis .kdg-progress {
+    height: 8px;
+    margin: 0 0 0.6em;
+    border-radius: 4px;
+    background: #e3eaf1;
+    overflow: hidden;
+}
+
+.keiba-diagnosis .kdg-progress-bar {
+    height: 100%;
+    background: #1565c0;
+}
+
+.keiba-diagnosis .kdg-step {
+    margin: 0 0 0.3em;
+    font-size: 0.85em;
+    color: #555;
+}
+
+.keiba-diagnosis .kdg-loading {
+    margin: 0;
+    text-align: center;
+}
+
+.keiba-diagnosis .kdg-type {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    font-size: 1.4em;
+}
+
+.keiba-diagnosis .kdg-race-main {
+    border: 2px solid #1565c0;
+}
+
+.keiba-diagnosis .kdg-race-title {
+    margin: 0 0 0.3em;
+    padding: 0;
+    border: 0;
+    font-size: 1.4em;
+}
+
+.keiba-diagnosis .kdg-race-meta {
+    margin: 0 0 0.8em;
+}
+
+.keiba-diagnosis .kdg-rank {
+    display: inline-block;
+    min-width: 5.5em;
+    padding: 0.1em 0.7em;
+    border-radius: 999px;
+    color: #fff;
+    font-weight: bold;
+    text-align: center;
+}
+
+.keiba-diagnosis .kdg-rank-S { background: #c62828; }
+.keiba-diagnosis .kdg-rank-A { background: #ef6c00; }
+.keiba-diagnosis .kdg-rank-B { background: #1e88e5; }
+
+.keiba-diagnosis .kdg-reason-title {
+    margin: 0 0 0.3em;
+    font-weight: bold;
+}
+
+.keiba-diagnosis .kdg-reasons {
+    margin: 0 0 0.8em 1.2em;
+    padding: 0;
+}
+
+.keiba-diagnosis .kdg-link {
+    display: inline-block;
+    margin: 0.4em 0 0;
+}
+
+.keiba-diagnosis .kdg-detail {
+    margin: 0.8em 0 0;
+    padding: 0.8em 0 0;
+    border-top: 1px dashed #b0bec5;
+}
+
+.keiba-diagnosis .kdg-table-scroll {
+    overflow-x: auto;
+}
+
+.keiba-diagnosis .kdg-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9em;
+}
+
+.keiba-diagnosis .kdg-table th,
+.keiba-diagnosis .kdg-table td {
+    padding: 0.4em 0.5em;
+    border-bottom: 1px solid #e0e6eb;
+    text-align: left;
+    white-space: nowrap;
+}
+
+.keiba-diagnosis .kdg-cta {
+    background: #f5faff;
+}
+
+.keiba-diagnosis .kdg-cta-title {
+    margin: 0 0 0.5em;
+    font-size: 1.15em;
+    font-weight: bold;
+}
+
+.keiba-diagnosis .kdg-line-panel {
+    margin: 0 0 0.7em;
+}

@@ -48,8 +48,19 @@ namespace KeibaDataCollector.Services
             _scores = scores;
         }
 
+        /// <summary>直近のGenerateForVenueで作ったレース要約（診断用の公開データ）。</summary>
+        public List<RaceSummary> LastRaceSummaries { get; private set; } = new List<RaceSummary>();
+
+        // レース番号 -> (レース名, 発走時刻"HH:mm")。ReadCurrentEntriesがRAレコードから埋める。
+        private readonly Dictionary<int, (string Name, string StartTime)> _raceInfo =
+            new Dictionary<int, (string Name, string StartTime)>();
+
+        private readonly Dictionary<int, List<PickCandidate>> _candidatesByRace =
+            new Dictionary<int, List<PickCandidate>>();
+
         public List<GeneratedPick> GenerateForVenue(DateTime raceDate, string trackCode)
         {
+            _candidatesByRace.Clear();
             var currentEntries = ReadCurrentEntries(raceDate, trackCode);
             var picks = new List<GeneratedPick>();
 
@@ -58,6 +69,7 @@ namespace KeibaDataCollector.Services
                 var raceKey = new RaceKey { RaceDate = raceDate, TrackCode = trackCode, RaceNumber = raceNumber };
                 var candidates = BuildCandidates(raceDate, trackCode, raceNumber, currentEntries[raceNumber]);
                 if (candidates.Count == 0) continue;
+                _candidatesByRace[raceNumber] = candidates;
 
                 var nerai = PickNerai(raceKey, candidates);
                 if (nerai != null) picks.Add(nerai);
@@ -83,7 +95,55 @@ namespace KeibaDataCollector.Services
                 safePicks.Add(pick);
             }
 
+            LastRaceSummaries = BuildRaceSummaries(safePicks);
             return safePicks;
+        }
+
+        /// <summary>診断用のレース要約。AI指数がある馬の上位3頭と、狙い馬/穴馬/危険な人気馬として
+        /// 公開した馬を候補にし、どの役割で公開したかを付ける。</summary>
+        private List<RaceSummary> BuildRaceSummaries(List<GeneratedPick> safePicks)
+        {
+            var summaries = new List<RaceSummary>();
+            foreach (var kv in _candidatesByRace.OrderBy(k => k.Key))
+            {
+                var raceNumber = kv.Key;
+                var withIndex = kv.Value.Where(c => c.AiIndex.HasValue).OrderByDescending(c => c.AiIndex.Value).ToList();
+                if (withIndex.Count == 0) continue; // AI指数が取得できないレースは推薦しない。
+
+                var picked = safePicks.Where(p => p.Race.RaceNumber == raceNumber).ToList();
+                var chosen = withIndex.Take(3).ToList();
+                foreach (var p in picked)
+                {
+                    var c = withIndex.FirstOrDefault(x => x.Umaban == p.Umaban);
+                    if (c != null && !chosen.Contains(c)) chosen.Add(c);
+                }
+
+                _raceInfo.TryGetValue(raceNumber, out var info);
+                var summary = new RaceSummary
+                {
+                    RaceNumber = raceNumber,
+                    RaceName = info.Name ?? string.Empty,
+                    StartTime = info.StartTime ?? string.Empty,
+                    FieldSize = kv.Value.Count,
+                };
+                foreach (var c in chosen)
+                {
+                    summary.Candidates.Add(new RaceCandidateInfo
+                    {
+                        Umaban = c.Umaban,
+                        HorseName = c.HorseName,
+                        AiIndex = c.AiIndex,
+                        Ninki = c.Ninki,
+                        TanshoOdds = c.TanshoOdds,
+                        DataCompleteness = c.DataCompleteness,
+                        Factors = c.Factors,
+                        Roles = picked.Where(p => p.Umaban == c.Umaban)
+                                      .Select(p => p.Category.ToString().ToLowerInvariant()).ToList(),
+                    });
+                }
+                summaries.Add(summary);
+            }
+            return summaries;
         }
 
         private List<PickCandidate> BuildCandidates(
@@ -244,6 +304,7 @@ namespace KeibaDataCollector.Services
         private Dictionary<int, Dictionary<int, bool>> ReadCurrentEntries(DateTime targetDate, string trackCode)
         {
             var result = new Dictionary<int, Dictionary<int, bool>>();
+            _raceInfo.Clear();
 
             var open = _source.Open("RACE", EarlyAnchorFromTime, DataOption.ThisWeekAndToday);
             if (open.ReturnCode == -1) { _source.Close(); return result; }
@@ -264,7 +325,17 @@ namespace KeibaDataCollector.Services
                     if (size < 0)
                         throw new InvalidOperationException($"{_source.SourceName} Read failed: {size}");
 
-                    if (JvRecordParser.GetRecordTypeId(buffer) != "SE") continue;
+                    var typeId = JvRecordParser.GetRecordTypeId(buffer);
+                    if (typeId == "RA")
+                    {
+                        var ra = new JV_RA_RACE();
+                        ra.SetDataB(ref buffer);
+                        var (raRaceKey, raOk) = TryBuildRaceKey(ra.id.Year, ra.id.MonthDay, ra.id.JyoCD, ra.id.RaceNum, targetDate);
+                        if (raOk && raRaceKey.TrackCode == trackCode)
+                            _raceInfo[raRaceKey.RaceNumber] = (Trim(ra.RaceInfo.Hondai), FormatStartTime(Trim(ra.HassoTime)));
+                        continue;
+                    }
+                    if (typeId != "SE") continue;
 
                     var se = new JV_SE_RACE_UMA();
                     se.SetDataB(ref buffer);
@@ -288,6 +359,14 @@ namespace KeibaDataCollector.Services
             }
 
             return result;
+        }
+
+        /// <summary>発走時刻 "HHMM" を "HH:mm" にする。不正な値は空（診断側は時刻不明として扱う）。</summary>
+        private static string FormatStartTime(string hhmm)
+        {
+            if (hhmm.Length != 4 || !int.TryParse(hhmm, out var v)) return string.Empty;
+            int h = v / 100, m = v % 100;
+            return h <= 23 && m <= 59 ? $"{h:00}:{m:00}" : string.Empty;
         }
 
         // ---- テンプレート補助 ----
