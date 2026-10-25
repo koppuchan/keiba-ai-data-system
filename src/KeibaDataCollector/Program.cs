@@ -27,9 +27,20 @@ namespace KeibaDataCollector
 
         private static TimeSpan LockWaitFor(string mode, string[] args)
         {
-            var isRepeating = mode == "score" || mode == "content"
+            var isRepeating = mode == "score" || mode == "content" || mode == "cycle"
                 || (mode == "trend" && args.Length > 1 && args[1] == "live");
             return isRepeating ? ComLockWait : ComLockWaitDaily;
+        }
+
+        /// <summary>そのモードが使うCOM（ソース）のロック名。cycle jv / cycle uma は片方だけ、それ以外は両方。</summary>
+        private static string[] LocksFor(string mode, string[] args)
+        {
+            if (mode == "cycle" && args.Length > 1)
+            {
+                if (args[1] == "jv") return new[] { ComAccessLock.Jv };
+                if (args[1] == "uma") return new[] { ComAccessLock.Uma };
+            }
+            return new[] { ComAccessLock.Jv, ComAccessLock.Uma };
         }
 
         // 定期実行のモードの最長実行時間。通常は数分で終わるため、これを超えるのはCOMの応答待ち等で
@@ -41,6 +52,7 @@ namespace KeibaDataCollector
             { "content", TimeSpan.FromMinutes(25) },
             { "trend", TimeSpan.FromMinutes(25) },
             { "verify", TimeSpan.FromMinutes(25) },
+            { "cycle", TimeSpan.FromMinutes(30) },
         };
 
         // COM(ActiveX)相手はSTAスレッドが前提のため必須。
@@ -71,7 +83,7 @@ namespace KeibaDataCollector
                 if (ComAccessLock.IsComMode(mode))
                 {
                     var wait = LockWaitFor(mode, args);
-                    comLock = ComAccessLock.TryAcquire(wait);
+                    comLock = ComAccessLock.TryAcquire(wait, LocksFor(mode, args));
                     if (comLock == null)
                     {
                         // 他の処理が長引いているだけで異常ではない。繰り返し実行の処理は次回に回る
@@ -327,6 +339,59 @@ namespace KeibaDataCollector
                             var scoring = new FactorScoringService(store);
                             RunScoreFor(jvLink, scoring, scoresStore, targetDate);
                             RunScoreFor(umaConn, scoring, scoresStore, targetDate);
+                        }
+                        break;
+                    }
+
+                    case "cycle":
+                    {
+                        // cycle <jv|uma> [yyyy-MM-dd]
+                        // 1つのソースについて score → trend → content を1つのプロセスで順に実行する。
+                        // 別々のタスクだと時刻が重なって順番待ち・見送りが起き、同じRACEデータを何度も読み直して
+                        // いた。ここでは初期化とRACEの読み込みを1回に共有し、重なりが起きない。
+                        // 片方のソースが固まっても、もう片方（別プロセス・別ロック）は止まらない。
+                        var sourceName = args.Length > 1 ? args[1] : null;
+                        if (sourceName != "jv" && sourceName != "uma")
+                        {
+                            Console.WriteLine("使い方: KeibaDataCollector.exe cycle <jv|uma> [yyyy-MM-dd]");
+                            break;
+                        }
+                        var cycleDate = DateTime.Today;
+                        if (args.Length > 2 && DateTime.TryParseExact(args[2], "yyyy-MM-dd",
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            System.Globalization.DateTimeStyles.None, out var cycleParsed))
+                        {
+                            cycleDate = cycleParsed;
+                        }
+                        var cycleSource = sourceName == "jv" ? jvLink : umaConn;
+
+                        using (var store = new HistoricalDataStore(AppConfig.HistoricalDbPath))
+                        using (var scoresStore = new ScoresStore(store.Connection))
+                        using (var licenseGateStore = new LicenseGateStore(store.Connection))
+                        using (var predictionStore = new PredictionStore(store.Connection))
+                        using (var trendStore = new TrendStore(store.Connection))
+                        {
+                            var shared = new CachingRaceSource(cycleSource, cycleDate);
+                            var now = DateTime.Now.TimeOfDay;
+
+                            // 1) AI指数
+                            RunScoreFor(cycleSource, new FactorScoringService(store), scoresStore, cycleDate, shared);
+
+                            // 2) 傾向。朝は未保存のときだけ、開催中は9時以降、終了後は20:30以降（繰り返し更新される）。
+                            RunTrendFor(cycleSource, store, trendStore, cycleDate, TrendStage.Morning, shared, onlyMissing: true);
+                            if (now >= TimeSpan.FromHours(9))
+                                RunTrendFor(cycleSource, store, trendStore, cycleDate, TrendStage.Live, shared);
+                            if (now >= new TimeSpan(20, 30, 0))
+                                RunTrendFor(cycleSource, store, trendStore, cycleDate, TrendStage.Final, shared);
+
+                            // 3) 公開（狙い馬・穴馬・危険な人気馬・TOP5・傾向）
+                            var validator = new ValidatorService(scoresStore, licenseGateStore, predictionStore);
+                            var wp = new WordPressClient(
+                                AppConfig.WordPressBaseUrl,
+                                AppConfig.WordPressUser,
+                                AppConfig.WordPressAppPassword);
+                            var publisher = new DigestPublisherService(wp, licenseGateStore, predictionStore);
+                            RunContentFor(cycleSource, scoresStore, trendStore, validator, publisher, cycleDate, shared);
                         }
                         break;
                     }
@@ -662,12 +727,12 @@ namespace KeibaDataCollector
             }
         }
 
-        private static void RunScoreFor(JvSpecComDataSource source, FactorScoringService scoring, ScoresStore scoresStore, DateTime targetDate)
+        private static void RunScoreFor(JvSpecComDataSource source, FactorScoringService scoring, ScoresStore scoresStore, DateTime targetDate, CachingRaceSource shared = null)
         {
             try
             {
                 source.Initialize(AppConfig.JvLinkSoftwareId);
-                new FactorPublishService(new CachingRaceSource(source, targetDate), scoring, scoresStore).RunForToday(targetDate);
+                new FactorPublishService(shared ?? new CachingRaceSource(source, targetDate), scoring, scoresStore).RunForToday(targetDate);
                 LogSuccess(source.SourceName, "AI指数算出", "正常終了");
             }
             catch (Exception ex)
@@ -676,7 +741,8 @@ namespace KeibaDataCollector
             }
         }
 
-        private static void RunTrendFor(JvSpecComDataSource source, HistoricalDataStore historical, TrendStore trendStore, DateTime targetDate, TrendStage stage)
+        private static void RunTrendFor(JvSpecComDataSource source, HistoricalDataStore historical, TrendStore trendStore, DateTime targetDate, TrendStage stage,
+            CachingRaceSource shared = null, bool onlyMissing = false)
         {
             try
             {
@@ -684,7 +750,7 @@ namespace KeibaDataCollector
 
                 // 当日この開催場が無いソース（例: 地方開催が無い日のJV-Link）は0件で正常に終わる。
                 // 同じRACEデータを開催場ごとに読み直さず、1回の実行で1度だけ読む（CachingRaceSource）。
-                var cached = new CachingRaceSource(source, targetDate);
+                var cached = shared ?? new CachingRaceSource(source, targetDate);
                 var venues = RaceDiscovery.ForDate(cached, targetDate)
                     .Select(k => k.TrackCode).Distinct().ToList();
                 if (venues.Count == 0)
@@ -696,6 +762,9 @@ namespace KeibaDataCollector
                 var engine = new TrendEngineService(cached, historical, trendStore);
                 foreach (var trackCode in venues)
                 {
+                    // 朝の傾向は1日1回でよい。すでに保存済みの開催場は飛ばす（cycleから毎回呼ばれるため）。
+                    if (onlyMissing && trendStore.Get(targetDate, trackCode, stage) != null) continue;
+
                     var snapshot = engine.ComputeAndSave(targetDate, trackCode, stage);
                     Console.WriteLine(
                         $"[{source.SourceName}] {targetDate:yyyy-MM-dd} 場={trackCode} 傾向({stage}) 算出完了: " +
@@ -712,7 +781,7 @@ namespace KeibaDataCollector
         }
 
         private static void RunContentFor(JvSpecComDataSource source, ScoresStore scoresStore, TrendStore trendStore,
-            ValidatorService validator, DigestPublisherService publisher, DateTime targetDate)
+            ValidatorService validator, DigestPublisherService publisher, DateTime targetDate, CachingRaceSource shared = null)
         {
             try
             {
@@ -720,7 +789,7 @@ namespace KeibaDataCollector
                 var isCentral = source.SourceName.Contains("中央");
 
                 // 同じRACEデータを開催場ごとに読み直さず、1回の実行で1度だけ読む（CachingRaceSource）。
-                var cached = new CachingRaceSource(source, targetDate);
+                var cached = shared ?? new CachingRaceSource(source, targetDate);
                 var venues = RaceDiscovery.ForDate(cached, targetDate)
                     .Select(k => k.TrackCode).Distinct().ToList();
                 if (venues.Count == 0)

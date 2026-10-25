@@ -54,7 +54,7 @@ Set-Location $scriptDir
 
 # 日中に繰り返し実行されるタスク。ビルド前に止めたら最後に必ず戻す
 # （1回のみのタスクは、止まっても翌日以降の予定実行で自然に拾われるため戻さない）。
-$RunningTasks = @("$TaskPrefix-Score", "$TaskPrefix-Content", "$TaskPrefix-TrendLive", "$TaskPrefix-Dashboard")
+$RunningTasks = @("$TaskPrefix-CycleCentral", "$TaskPrefix-CycleLocal", "$TaskPrefix-Dashboard")
 # 登録済みの全タスク（$TaskPrefix-*）を動的に取得して止める。ハードコードすると
 # register-scheduled-tasks.ps1側でタスクを追加・変更した際にここが古いままになるため。
 $AllTasks = @(Get-ScheduledTask -TaskName "$TaskPrefix-*" -ErrorAction SilentlyContinue | ForEach-Object { $_.TaskName })
@@ -139,9 +139,9 @@ Get-ScheduledTask -TaskName "$TaskPrefix-*" | Format-Table TaskName, State -Auto
 
 $today = Get-Date -Format 'yyyyMMdd'
 Write-Step '数分後に確認してください'
-Write-Output "  Get-Content '.\logs\score-$today.log'   -Encoding UTF8 | Select-String '算出完了'"
-Write-Output "  Get-Content '.\logs\content-$today.log' -Encoding UTF8 | Select-String '公開完了'"
+Write-Output "  Get-Content '.\logs\cycle-uma-$today.log' -Encoding UTF8 | Select-String 'cycle|算出完了|公開完了'"
+Write-Output "  Get-Content '.\logs\cycle-jv-$today.log'  -Encoding UTF8 | Select-String 'cycle|算出完了|公開完了'"
 Write-Output ""
 Write-Output "確認ポイント:"
-Write-Output "  ・score: 「（所要 ◯分）」が繰り返し間隔(20分)を超えていないこと"
-Write-Output "  ・content: WordPress公開の失敗が続いていないこと"
+Write-Output "  ・cycle: 開始(start)と終了(end)の間が、繰り返し間隔(20分)を超えていないこと"
+Write-Output "  ・WordPress公開の失敗が続いていないこと"
