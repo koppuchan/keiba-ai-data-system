@@ -139,6 +139,7 @@ namespace KeibaDataCollector.Services
             }
 
             int computed = 0, failed = 0;
+            var scoringTimer = System.Diagnostics.Stopwatch.StartNew();
             var coverage = new FactorCoverage();
             foreach (var slug in entriesByRace.Keys)
             {
@@ -177,6 +178,7 @@ namespace KeibaDataCollector.Services
                     "何らかのスコアあり（血統・調教等、母集団不足やデータ未取得のものはnullのまま）");
             }
 
+            Console.WriteLine($"[{_source.SourceName}] 6ファクター/AI指数の計算に{scoringTimer.Elapsed.TotalSeconds:0}秒（{coverage.Total}頭）");
             var note = failed > 0 ? $"（{failed}レースは計算失敗）" : "";
             Console.WriteLine(
                 $"[{_source.SourceName}] {targetDate:yyyy-MM-dd} 6ファクター/AI指数算出 {computed}レース 完了{note}");
