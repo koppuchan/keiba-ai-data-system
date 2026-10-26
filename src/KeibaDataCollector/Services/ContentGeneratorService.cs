@@ -42,10 +42,24 @@ namespace KeibaDataCollector.Services
 
         private static readonly string[] BannedWords = { "絶対", "確実", "間違いない", "必ず", "100%" };
 
-        public ContentGeneratorService(IRaceDataSource source, ScoresStore scores)
+        private readonly RealtimeCacheStore _cache;
+
+        /// <param name="cache">指定すると、発走後のレースのオッズは取り直さず保存済みの値を使う
+        /// （速報の問い合わせは1回数秒〜十数秒かかり、全レース分を毎回取り直すと周期が20分を超えるため）。</param>
+        public ContentGeneratorService(IRaceDataSource source, ScoresStore scores, RealtimeCacheStore cache = null)
         {
             _source = source;
             _scores = scores;
+            _cache = cache;
+        }
+
+        /// <summary>そのレースは発走から3分以上たっているか（発走時刻が不明ならfalse）。過去の日付は発走済み。</summary>
+        internal static bool HasStarted(DateTime raceDate, string startTimeHHmm)
+        {
+            if (raceDate.Date < DateTime.Today) return true;
+            if (raceDate.Date > DateTime.Today) return false;
+            if (string.IsNullOrEmpty(startTimeHHmm) || !TimeSpan.TryParse(startTimeHHmm, out var start)) return false;
+            return DateTime.Now.TimeOfDay >= start + TimeSpan.FromMinutes(3);
         }
 
         /// <summary>直近のGenerateForVenueで作ったレース要約（診断用の公開データ）。</summary>
@@ -151,7 +165,19 @@ namespace KeibaDataCollector.Services
         {
             var scores = _scores.GetRaceScores(raceDate, trackCode, raceNumber);
             var raceKey = new RaceKey { RaceDate = raceDate, TrackCode = trackCode, RaceNumber = raceNumber };
-            var odds = RealtimeOddsFetcher.FetchTansho(_source, raceKey, out _);
+            Dictionary<int, JvRecordParser.TanshoOdds> odds = null;
+            _raceInfo.TryGetValue(raceNumber, out var raceInfo);
+            var started = HasStarted(raceDate, raceInfo.StartTime);
+            if (started && _cache != null)
+                odds = _cache.GetOdds(raceDate, trackCode, raceNumber); // 発走後はもう変わらない。取り直さない。
+            if (odds == null)
+            {
+                var oddsTimer = System.Diagnostics.Stopwatch.StartNew();
+                odds = RealtimeOddsFetcher.FetchTansho(_source, raceKey, out _);
+                if (oddsTimer.Elapsed.TotalSeconds >= 10)
+                    Console.WriteLine($"[ContentGenerator] {trackCode} {raceNumber}R のオッズ取得に{oddsTimer.Elapsed.TotalSeconds:0}秒かかりました。");
+                if (odds != null && _cache != null) _cache.SaveOdds(raceDate, trackCode, raceNumber, odds);
+            }
 
             var candidates = new List<PickCandidate>();
             foreach (var s in scores)

@@ -31,6 +31,7 @@ namespace KeibaDataCollector.Interop
                 return null;
             }
 
+            var download = new DownloadWait(System.TimeSpan.FromSeconds(60));
             try
             {
                 while (true)
@@ -38,7 +39,8 @@ namespace KeibaDataCollector.Interop
                     int size = source.Read(out var buffer, out _);
                     if (size == 0) break;
                     if (size == -1) continue;
-                    if (size == -3) { Thread.Sleep(500); continue; }
+                    if (size == -3) { download.Wait(); continue; }
+                    download.Reset();
                     if (size < 0) break;
 
                     if (JvRecordParser.GetRecordTypeId(buffer) != "O1") continue;
@@ -46,6 +48,13 @@ namespace KeibaDataCollector.Interop
                     var (_, parsed) = JvRecordParser.ParseTanshoOdds(buffer);
                     if (parsed.Count > 0) byUmaban = parsed; // 後から届いたものほど新しい
                 }
+            }
+            catch (System.TimeoutException ex)
+            {
+                // このレースのオッズだけ諦める（他のレースの処理は続ける）。
+                System.Console.WriteLine($"[{source.SourceName}] {race.TrackCode} {race.RaceNumber}R の速報オッズが取得できませんでした: {ex.Message}");
+                lastOpenReturnCode = -999;
+                byUmaban = null;
             }
             finally
             {

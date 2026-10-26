@@ -373,9 +373,15 @@ namespace KeibaDataCollector
                         {
                             var shared = new CachingRaceSource(cycleSource, cycleDate);
                             var now = DateTime.Now.TimeOfDay;
+                            var timer = System.Diagnostics.Stopwatch.StartNew();
+                            Action<string> lap = step =>
+                            {
+                                Console.WriteLine($"[cycle {sourceName}] {step} 完了（ここまで{timer.Elapsed.TotalSeconds:0}秒）");
+                            };
 
                             // 1) AI指数
                             RunScoreFor(cycleSource, new FactorScoringService(store), scoresStore, cycleDate, shared);
+                            lap("AI指数");
 
                             // 2) 傾向。朝は未保存のときだけ、開催中は9時以降、終了後は20:30以降（繰り返し更新される）。
                             RunTrendFor(cycleSource, store, trendStore, cycleDate, TrendStage.Morning, shared, onlyMissing: true);
@@ -383,6 +389,7 @@ namespace KeibaDataCollector
                                 RunTrendFor(cycleSource, store, trendStore, cycleDate, TrendStage.Live, shared);
                             if (now >= new TimeSpan(20, 30, 0))
                                 RunTrendFor(cycleSource, store, trendStore, cycleDate, TrendStage.Final, shared);
+                            lap("傾向");
 
                             // 3) 公開（狙い馬・穴馬・危険な人気馬・TOP5・傾向）
                             var validator = new ValidatorService(scoresStore, licenseGateStore, predictionStore);
@@ -392,6 +399,7 @@ namespace KeibaDataCollector
                                 AppConfig.WordPressAppPassword);
                             var publisher = new DigestPublisherService(wp, licenseGateStore, predictionStore);
                             RunContentFor(cycleSource, scoresStore, trendStore, validator, publisher, cycleDate, shared);
+                            lap("公開");
                         }
                         break;
                     }
@@ -759,7 +767,9 @@ namespace KeibaDataCollector
                     return;
                 }
 
-                var engine = new TrendEngineService(cached, historical, trendStore);
+                using (var realtimeCache = new RealtimeCacheStore(AppConfig.HistoricalDbPath))
+                {
+                var engine = new TrendEngineService(cached, historical, trendStore, realtimeCache);
                 foreach (var trackCode in venues)
                 {
                     // 朝の傾向は1日1回でよい。すでに保存済みの開催場は飛ばす（cycleから毎回呼ばれるため）。
@@ -773,6 +783,7 @@ namespace KeibaDataCollector
                         $"上がりサンプル={snapshot.Agari.SampleCount}, 通過順サンプル={snapshot.Passage.SampleCount}");
                 }
                 LogSuccess(source.SourceName, "傾向算出", $"正常終了（{stage}）");
+                }
             }
             catch (Exception ex)
             {
@@ -783,9 +794,11 @@ namespace KeibaDataCollector
         private static void RunContentFor(JvSpecComDataSource source, ScoresStore scoresStore, TrendStore trendStore,
             ValidatorService validator, DigestPublisherService publisher, DateTime targetDate, CachingRaceSource shared = null)
         {
+            RealtimeCacheStore realtimeCache = null;
             try
             {
                 source.Initialize(AppConfig.JvLinkSoftwareId);
+                realtimeCache = new RealtimeCacheStore(AppConfig.HistoricalDbPath);
                 var isCentral = source.SourceName.Contains("中央");
 
                 // 同じRACEデータを開催場ごとに読み直さず、1回の実行で1度だけ読む（CachingRaceSource）。
@@ -798,10 +811,12 @@ namespace KeibaDataCollector
                     return;
                 }
 
-                var generator = new ContentGeneratorService(cached, scoresStore);
+                var generator = new ContentGeneratorService(cached, scoresStore, realtimeCache);
                 foreach (var trackCode in venues)
                 {
+                    var venueTimer = System.Diagnostics.Stopwatch.StartNew();
                     var picks = generator.GenerateForVenue(targetDate, trackCode);
+                    Console.WriteLine($"[{source.SourceName}] 場={trackCode} ピック生成に{venueTimer.Elapsed.TotalSeconds:0}秒");
                     Console.WriteLine($"[{source.SourceName}] {targetDate:yyyy-MM-dd} 場={trackCode} " +
                         $"狙い馬={picks.Count(p => p.Category == PickCategory.Nerai)}件 " +
                         $"穴馬={picks.Count(p => p.Category == PickCategory.Ana)}件 " +
@@ -840,10 +855,12 @@ namespace KeibaDataCollector
                     // よう、この呼び出しだけ個別にtry/catchする。
                     try
                     {
+                        venueTimer.Restart();
                         var publishOutcome = publisher
                             .PublishAsync(targetDate, trackCode, isCentral, top5, trendMorning, trendLive, trendFinal, validated, generator.LastRaceSummaries)
                             .GetAwaiter().GetResult();
 
+                        Console.WriteLine($"[{source.SourceName}] 場={trackCode} WordPress送信に{venueTimer.Elapsed.TotalSeconds:0}秒");
                         Console.WriteLine(publishOutcome.WasPublished
                             ? $"[{source.SourceName}] {targetDate:yyyy-MM-dd} 場={trackCode} WordPress公開完了（ピック{publishOutcome.PublishedPickCount}件、公開停止{publishOutcome.BlockedPickCount}件）"
                             : $"[{source.SourceName}] {targetDate:yyyy-MM-dd} 場={trackCode} WordPress公開を見送り: {publishOutcome.SkipReason}");
@@ -858,6 +875,10 @@ namespace KeibaDataCollector
             catch (Exception ex)
             {
                 LogFailure(source.SourceName, "本日の狙い馬・穴馬・危険な人気馬の生成・公開に失敗（このソースのみスキップして続行）", ex, critical: true, persistent: true);
+            }
+            finally
+            {
+                realtimeCache?.Dispose();
             }
         }
 
