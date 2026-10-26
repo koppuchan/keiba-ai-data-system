@@ -31,11 +31,15 @@ namespace KeibaDataCollector.Services
         // RaceCardService等と同じ理由（出走表は開催日より前に公開されるため）。
         private const string EarlyAnchorFromTime = "19860101000000";
 
-        public TrendEngineService(IRaceDataSource source, HistoricalDataStore historical, TrendStore trendStore)
+        private readonly RealtimeCacheStore _cache;
+
+        /// <param name="cache">指定すると、確定済みレースの成績は保存して、次回以降は問い合わせずに使う。</param>
+        public TrendEngineService(IRaceDataSource source, HistoricalDataStore historical, TrendStore trendStore, RealtimeCacheStore cache = null)
         {
             _source = source;
             _historical = historical;
             _trendStore = trendStore;
+            _cache = cache;
         }
 
         public VenueTrendSnapshot ComputeAndSave(DateTime raceDate, string trackCode, TrendStage stage)
@@ -206,6 +210,10 @@ namespace KeibaDataCollector.Services
             {
                 if (race.StartTime.HasValue && raceDate.Date + race.StartTime.Value > earliestCheck) continue;
 
+                // 確定済みの成績は変わらない。前の周期で保存したものがあれば、問い合わせずにそれを使う。
+                var cachedPayload = _cache?.GetResult(raceDate, trackCode, race.Key.RaceNumber);
+                if (cachedPayload != null && TryApplyCachedResult(race, cachedPayload)) continue;
+
                 try
                 {
                     int rc = _source.OpenRealtime("0B12", new RaceKey
@@ -222,6 +230,7 @@ namespace KeibaDataCollector.Services
                     var horses = new Dictionary<int, TodayHorse>();
                     JV_RA_RACE? ra = null;
                     var complete = false;
+                    var download = new DownloadWait(TimeSpan.FromSeconds(60));
                     try
                     {
                         while (true)
@@ -229,7 +238,8 @@ namespace KeibaDataCollector.Services
                             int size = _source.Read(out var buffer, out _);
                             if (size == 0) break;
                             if (size == -1) continue;
-                            if (size == -3) { System.Threading.Thread.Sleep(500); continue; }
+                            if (size == -3) { download.Wait(); continue; }
+                            download.Reset();
                             if (size < 0)
                                 throw new InvalidOperationException($"{_source.SourceName} Read failed: {size}");
 
@@ -280,12 +290,75 @@ namespace KeibaDataCollector.Services
                         var dirt = Trim(record.TenkoBaba.DirtBabaCD);
                         if (HasCode(dirt)) race.DirtConditionCode = dirt;
                     }
+
+                    _cache?.SaveResult(raceDate, trackCode, race.Key.RaceNumber, SerializeResult(race));
                 }
                 catch (Exception ex)
                 {
                     Console.WriteLine(
                         $"[{_source.SourceName}] {trackCode} {race.Key.RaceNumber}R の速報成績を取得できませんでした（このレースは集計に含めません）: {ex.Message}");
                 }
+            }
+        }
+
+        /// <summary>保存用の確定成績（JSON）。</summary>
+        private class CachedResult
+        {
+            public List<CachedHorse> Horses { get; set; } = new List<CachedHorse>();
+            public int[] Earliest { get; set; } = Array.Empty<int>();
+            public int[] Latest { get; set; } = Array.Empty<int>();
+            public string Weather { get; set; }
+            public string Turf { get; set; }
+            public string Dirt { get; set; }
+        }
+
+        private class CachedHorse
+        {
+            public int Umaban { get; set; }
+            public int Waku { get; set; }
+            public int Chakujun { get; set; }
+            public double? Agari3F { get; set; }
+            public bool IsScratched { get; set; }
+        }
+
+        private static string SerializeResult(TodayRace race)
+        {
+            return Newtonsoft.Json.JsonConvert.SerializeObject(new CachedResult
+            {
+                Horses = race.Horses.Select(h => new CachedHorse
+                {
+                    Umaban = h.Umaban, Waku = h.Waku, Chakujun = h.Chakujun, Agari3F = h.Agari3F, IsScratched = h.IsScratched,
+                }).ToList(),
+                Earliest = race.EarliestCornerOrder,
+                Latest = race.LatestCornerOrder,
+                Weather = race.WeatherCode,
+                Turf = race.TurfConditionCode,
+                Dirt = race.DirtConditionCode,
+            });
+        }
+
+        /// <summary>保存済みの成績をレースへ反映する。読めない・成績が空なら反映せずfalse（取り直す）。</summary>
+        private static bool TryApplyCachedResult(TodayRace race, string payload)
+        {
+            try
+            {
+                var cached = Newtonsoft.Json.JsonConvert.DeserializeObject<CachedResult>(payload);
+                if (cached == null || !cached.Horses.Any(h => !h.IsScratched && h.Chakujun > 0)) return false;
+
+                race.Horses = cached.Horses.Select(h => new TodayHorse
+                {
+                    Umaban = h.Umaban, Waku = h.Waku, Chakujun = h.Chakujun, Agari3F = h.Agari3F, IsScratched = h.IsScratched,
+                }).ToList();
+                race.EarliestCornerOrder = cached.Earliest ?? Array.Empty<int>();
+                race.LatestCornerOrder = cached.Latest ?? Array.Empty<int>();
+                if (HasCode(cached.Weather ?? string.Empty)) race.WeatherCode = cached.Weather;
+                if (HasCode(cached.Turf ?? string.Empty)) race.TurfConditionCode = cached.Turf;
+                if (HasCode(cached.Dirt ?? string.Empty)) race.DirtConditionCode = cached.Dirt;
+                return true;
+            }
+            catch (Newtonsoft.Json.JsonException)
+            {
+                return false;
             }
         }
 

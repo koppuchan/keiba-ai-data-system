@@ -83,6 +83,7 @@ namespace KeibaDataCollector.Interop
                 return;
             }
 
+            var download = new DownloadWait(TimeSpan.FromSeconds(180));
             try
             {
                 while (true)
@@ -90,7 +91,8 @@ namespace KeibaDataCollector.Interop
                     int size = _inner.Read(out var buffer, out _);
                     if (size == 0) break;
                     if (size == -1) continue;                         // ファイル切り替わり（正常）
-                    if (size == -3) { Thread.Sleep(500); continue; }  // ダウンロード中
+                    if (size == -3) { download.Wait(); continue; }    // ダウンロード中
+                    download.Reset();
                     if (size < 0)
                         throw new InvalidOperationException($"{_inner.SourceName} Read failed: {size}");
 
