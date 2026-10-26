@@ -71,6 +71,7 @@ namespace KeibaDataCollector.Interop
         /// （次の呼び出しで読み直す）。</summary>
         private void LoadFromSource(string dataSpec, string fromTime, DataOption option)
         {
+            var timer = System.Diagnostics.Stopwatch.StartNew();
             var open = _inner.Open(dataSpec, fromTime, option);
             var records = new List<string>();
             long cachedChars = 0;
@@ -113,6 +114,7 @@ namespace KeibaDataCollector.Interop
 
             _cachedOpen = open;
             _cachedRecords = records;
+            Console.WriteLine($"[{_inner.SourceName}] RACEデータの読み込みに{timer.Elapsed.TotalSeconds:0}秒（対象日のレコード{records.Count}件）");
         }
 
         public int Read(out string buffer, out string fileName)

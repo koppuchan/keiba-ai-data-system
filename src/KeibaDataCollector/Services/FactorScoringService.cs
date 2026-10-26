@@ -57,7 +57,10 @@ namespace KeibaDataCollector.Services
         /// 回収率は複勝払戻（fukusho_payout）を使う（④騎手コース回収率と同じ計算方法）。</summary>
         private double? ComputeWakuBias(string trackCode, int distance, string surfaceCode, int waku)
         {
-            var stats = new Dictionary<int, (double RentaiRate, double Roi)>();
+            var wakuKey = trackCode + "|" + distance + "|" + surfaceCode;
+            if (!_wakuStatsCache.TryGetValue(wakuKey, out var stats))
+            {
+            stats = new Dictionary<int, (double RentaiRate, double Roi)>();
             using (var cmd = new SQLiteCommand(@"
                 SELECT waku, COUNT(*) total,
                        SUM(CASE WHEN chakujun BETWEEN 1 AND 2 THEN 1 ELSE 0 END) rentai,
@@ -82,6 +85,8 @@ namespace KeibaDataCollector.Services
                             r.GetDouble(3) / (total * 100.0));
                     }
                 }
+            }
+            _wakuStatsCache[wakuKey] = stats;
             }
 
             if (!stats.TryGetValue(waku, out var thisStat) || stats.Count < 2) return null;
@@ -119,6 +124,22 @@ namespace KeibaDataCollector.Services
             }
             if (!horseStyle.HasValue) return null;
 
+            var paceKey = trackCode + "|" + distance + "|" + surfaceCode;
+            if (!_paceCourseCache.TryGetValue(paceKey, out var course))
+            {
+                course = ComputePaceCourseStats(trackCode, distance, surfaceCode);
+                _paceCourseCache[paceKey] = course;
+            }
+            if (!course.Usable) return null;
+
+            return ToDeviationScore(horseStyle.Value, course.Mean, course.StdDev, invert: course.FavorsFront);
+        }
+
+        /// <summary>②テン速度・展開の、コース単位の母集団（先行有利か、前目通過の平均と標準偏差）。
+        /// 馬ごとではなくコース条件ごとに1回だけ計算する。サンプル不足ならUsable=false。</summary>
+        private (bool Usable, bool FavorsFront, double Mean, double StdDev) ComputePaceCourseStats(
+            string trackCode, int distance, string surfaceCode)
+        {
             double? placedAvg = null, restAvg = null;
             int placedCount = 0, restCount = 0;
             using (var cmd = new SQLiteCommand(@"
@@ -153,7 +174,7 @@ namespace KeibaDataCollector.Services
                 }
             }
             if (placedCount < MinGroupSample || restCount < MinGroupSample || !placedAvg.HasValue || !restAvg.HasValue)
-                return null;
+                return (false, false, 0, 0);
 
             // 複勝圏内の馬の方が前目(値が小さい)を通過していれば、このコースは先行有利。
             var trackFavorsFront = placedAvg.Value < restAvg.Value;
@@ -166,9 +187,9 @@ namespace KeibaDataCollector.Services
                     p.AddWithValue("@distance", distance);
                     p.AddWithValue("@surface", surfaceCode);
                 });
-            if (popCount < MinGroupSample || stddev <= 0) return null;
+            if (popCount < MinGroupSample || stddev <= 0) return (false, false, 0, 0);
 
-            return ToDeviationScore(horseStyle.Value, mean, stddev, invert: trackFavorsFront);
+            return (true, trackFavorsFront, mean, stddev);
         }
 
         /// <summary>③上がり3F質・末脚: 直近走の上がり3Fタイム平均を、同じ馬場種別（芝/ダート）
@@ -191,9 +212,14 @@ namespace KeibaDataCollector.Services
             }
             if (!recentAvg.HasValue) return null;
 
-            var (mean, stddev, count) = GetPopulationMeanStdDev(
-                "SELECT agari_3f FROM race_entries WHERE track_surface_code=@surface AND agari_3f IS NOT NULL AND agari_3f > 0",
-                p => p.AddWithValue("@surface", surfaceCode));
+            if (!_agariPopulationCache.TryGetValue(surfaceCode ?? string.Empty, out var agariPop))
+            {
+                agariPop = GetPopulationMeanStdDev(
+                    "SELECT agari_3f FROM race_entries WHERE track_surface_code=@surface AND agari_3f IS NOT NULL AND agari_3f > 0",
+                    p => p.AddWithValue("@surface", surfaceCode));
+                _agariPopulationCache[surfaceCode ?? string.Empty] = agariPop;
+            }
+            var (mean, stddev, count) = agariPop;
             if (count < MinGroupSample || stddev <= 0) return null;
 
             return ToDeviationScore(recentAvg.Value, mean, stddev, invert: true);
@@ -206,7 +232,10 @@ namespace KeibaDataCollector.Services
         {
             if (string.IsNullOrEmpty(jockeyCode)) return null;
 
-            var rois = new Dictionary<string, double>();
+            var jockeyKey = trackCode + "|" + distance;
+            if (!_jockeyRoiCache.TryGetValue(jockeyKey, out var rois))
+            {
+            rois = new Dictionary<string, double>();
             using (var cmd = new SQLiteCommand(@"
                 SELECT jockey_code, COUNT(*) total, SUM(COALESCE(fukusho_payout, 0)) totalPayout
                 FROM race_entries
@@ -227,6 +256,8 @@ namespace KeibaDataCollector.Services
                         rois[r.GetString(0)] = payout / (total * 100.0); // 100円あたりの回収率（1.0=収支トントン）
                     }
                 }
+            }
+            _jockeyRoiCache[jockeyKey] = rois;
             }
 
             if (!rois.TryGetValue(jockeyCode, out var thisRoi) || rois.Count < 2) return null;
@@ -268,6 +299,20 @@ namespace KeibaDataCollector.Services
 
         private readonly Dictionary<string, Dictionary<string, (double PlaceRate, double Roi)>> _sireStatsCache =
             new Dictionary<string, Dictionary<string, (double PlaceRate, double Roi)>>();
+
+        // 母集団の統計（コース・騎手・馬場・調教の分布）は、馬ごとではなく条件ごとに1回だけ計算して使い回す。
+        // 以前は馬1頭ごとに同じ集計（数十万行の走査）をやり直していて、AI指数の算出だけで10〜15分かかった
+        // （実測 2026-10-26）。1回の実行の中ではデータは変わらないため、条件をキーにして保持する。
+        private readonly Dictionary<string, Dictionary<int, (double RentaiRate, double Roi)>> _wakuStatsCache =
+            new Dictionary<string, Dictionary<int, (double RentaiRate, double Roi)>>();
+        private readonly Dictionary<string, (bool Usable, bool FavorsFront, double Mean, double StdDev)> _paceCourseCache =
+            new Dictionary<string, (bool Usable, bool FavorsFront, double Mean, double StdDev)>();
+        private readonly Dictionary<string, (double Mean, double StdDev, int Count)> _agariPopulationCache =
+            new Dictionary<string, (double Mean, double StdDev, int Count)>();
+        private readonly Dictionary<string, Dictionary<string, double>> _jockeyRoiCache =
+            new Dictionary<string, Dictionary<string, double>>();
+        private readonly Dictionary<string, (double Mean, double StdDev, int Count)> _trainingPopulationCache =
+            new Dictionary<string, (double Mean, double StdDev, int Count)>();
 
         /// <summary>種牡馬の産駒成績で適性を測る。「同じ競馬場・同じ距離」で20走以上ある種牡馬は
         /// 少なく（実機: 地方で⑤が約50%止まり）、そこだけだと父が分かっていても算出できない。
@@ -362,10 +407,16 @@ namespace KeibaDataCollector.Services
             }
             if (!course.HasValue || !lastFurlong.HasValue) return null;
 
-            var (mean, stddev, count) = GetPopulationMeanStdDev(
-                "SELECT CAST(lap_times_seconds AS TEXT) FROM training_laps WHERE course=@course;",
-                p => p.AddWithValue("@course", course.Value.ToString()),
-                extractFirstLap: true);
+            var courseKey = course.Value.ToString();
+            if (!_trainingPopulationCache.TryGetValue(courseKey, out var trainingPop))
+            {
+                trainingPop = GetPopulationMeanStdDev(
+                    "SELECT CAST(lap_times_seconds AS TEXT) FROM training_laps WHERE course=@course;",
+                    p => p.AddWithValue("@course", courseKey),
+                    extractFirstLap: true);
+                _trainingPopulationCache[courseKey] = trainingPop;
+            }
+            var (mean, stddev, count) = trainingPop;
             if (count < MinGroupSample || stddev <= 0) return null;
 
             var baseScore = ToDeviationScore(lastFurlong.Value, mean, stddev, invert: true); // タイムは短いほど良い
