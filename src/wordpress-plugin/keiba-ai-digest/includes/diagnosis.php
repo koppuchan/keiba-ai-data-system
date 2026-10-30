@@ -88,9 +88,11 @@ function keiba_diag_candidate_matches($candidate, $style, $popularity, $use_popu
     $odds = isset($candidate['tanshoOdds']) && is_numeric($candidate['tanshoOdds']) ? (float) $candidate['tanshoOdds'] : null;
     $roles = isset($candidate['roles']) && is_array($candidate['roles']) ? $candidate['roles'] : array();
 
-    // 人気・オッズが取れていない馬は、人気で絞る質問に答えられないため対象にしない。
+    // 人気・オッズが取れていない馬（発売前の朝など）は、人気で絞る質問には答えられない。
+    // ただし「AIの総合評価を重視」で、人気層の指定が無い（または人気の条件を外した）場合は、
+    // 人気を使わないので、AI指数だけで判定できる。
     if ($ninki === null) {
-        return false;
+        return $style === 'ai' && (!$use_popularity || $popularity === 'any');
     }
 
     switch ($style) {
