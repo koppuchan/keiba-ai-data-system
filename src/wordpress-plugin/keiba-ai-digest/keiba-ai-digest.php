@@ -4,14 +4,14 @@
  * Description: KeibaDataCollector（JRAVAN+競馬最強の法則WEB 全自動AI競馬データシステム）から送られる
  *              AI指数TOP5・本日の傾向・狙い馬/穴馬/危険な人気馬を、開催場・日単位のカスタム投稿タイプ
  *              「keiba_digest」として受け取り、表示する。既存の Keiba Race Sync（race投稿）とは別。
- * Version: 0.7.2
+ * Version: 0.7.3
  */
 
 if (!defined('ABSPATH')) {
     exit;
 }
 
-define('KEIBA_AI_DIGEST_VERSION', '0.7.2');
+define('KEIBA_AI_DIGEST_VERSION', '0.7.3');
 
 require_once __DIR__ . '/includes/diagnosis.php';
 define('KEIBA_AI_DIGEST_JSON_META_KEYS', array(
@@ -213,6 +213,7 @@ add_action('rest_api_init', function () {
             update_option('keiba_ai_digest_verification_report', $body, false);
             update_option('keiba_ai_digest_verification_at', current_time('mysql', true), false);
             $page_id = keiba_ai_digest_ensure_verification_page();
+            keiba_ai_digest_purge_page_cache($page_id);
             return array('ok' => true, 'pageId' => $page_id);
         },
     ));
@@ -700,6 +701,24 @@ function keiba_ai_digest_render_picks($picks)
  * AI指数の過去検証ページ（仕様書§18）。検証結果を初めて受け取った時に固定ページを
  * 自動作成し、ショートコード [keiba_ai_verification] で表示する。
  * ------------------------------------------------------------------------- */
+
+/**
+ * ページキャッシュ（WP Rocket等）を、指定の固定ページだけ消す。検証結果はオプションに保存するだけで
+ * 投稿の更新にならないため、キャッシュが自動では消えず、利用者に古い検証ページが表示され続けた
+ * （実測 2026-10-30: 10/25の内容のまま。実データは10/29まで更新済みだった）。
+ */
+function keiba_ai_digest_purge_page_cache($post_id)
+{
+    if (!$post_id) {
+        return;
+    }
+    if (function_exists('rocket_clean_post')) {
+        rocket_clean_post((int) $post_id);
+    }
+    if (function_exists('clean_post_cache')) {
+        clean_post_cache((int) $post_id);
+    }
+}
 
 function keiba_ai_digest_ensure_verification_page()
 {
