@@ -129,7 +129,10 @@ add_action('template_redirect', function () {
     }
 });
 
-/** 診断ページの下に出す、4つのページへのリンク。ページが無い（削除された）ものは出さない。 */
+/**
+ * 4つのページへのリンク（ページが無い・削除されたものは出さない）。
+ * 診断ページの下には出さない（運営者の希望。サイト全体のフッターのメニューに入れたため）。必要になったときのために残している。
+ */
 function keiba_legal_footer_links_html()
 {
     $ids = (array) get_option('keiba_ai_digest_legal_page_ids', array());
