@@ -98,10 +98,12 @@ add_filter('body_class', function ($classes) {
  * 項目のIDに頼らず、フッターのメニューと、下段の「Powered by ...」の表示を、まとめて白にする。
  */
 add_action('wp_head', function () {
+    // 下段は「Copyright」の段落と、その次の「Powered by ...」の段落の2つ。後者は、運営者の希望で表示しない。
     echo '<style id="keiba-ai-digest-footer">'
         . 'footer.siteFooter .footerMenu a,footer.siteFooter .footerMenu a:visited,'
-        . 'footer.siteFooter .copySection,footer.siteFooter .copySection a,footer.siteFooter .copySection a:visited{color:#fff}'
-        . 'footer.siteFooter .footerMenu a:hover,footer.siteFooter .copySection a:hover{color:#fff;text-decoration:underline}'
+        . 'footer.siteFooter .copySection{color:#fff}'
+        . 'footer.siteFooter .footerMenu a:hover{color:#fff;text-decoration:underline}'
+        . 'footer.siteFooter .copySection p + p{display:none}'
         . '</style>';
 }, 100);
 
