@@ -92,6 +92,28 @@ add_filter('body_class', function ($classes) {
     return $classes;
 });
 
+/**
+ * 旧「運営者情報・免責事項」ページ（内容が新しい「会社概要」と重複するため削除した）のアドレスに来た人を、
+ * 新しい会社概要のページへ恒久的に転送する（外部やブックマークからのリンク切れを防ぐ）。
+ * 該当のアドレスが404になっている場合だけ働く（旧ページが残っているうちは何もしない）。
+ */
+add_action('template_redirect', function () {
+    if (!is_404()) {
+        return;
+    }
+    $path = isset($_SERVER['REQUEST_URI']) ? (string) parse_url(wp_unslash($_SERVER['REQUEST_URI']), PHP_URL_PATH) : '';
+    $path = trim(rawurldecode($path), '/');
+    if ($path !== '運営者情報・免責事項') {
+        return;
+    }
+    $ids = (array) get_option('keiba_ai_digest_legal_page_ids', array());
+    $company = isset($ids['company']) ? (int) $ids['company'] : 0;
+    if ($company && get_post_status($company) === 'publish') {
+        wp_safe_redirect(get_permalink($company), 301);
+        exit;
+    }
+});
+
 /** 診断ページの下に出す、4つのページへのリンク。ページが無い（削除された）ものは出さない。 */
 function keiba_legal_footer_links_html()
 {
