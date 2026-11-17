@@ -4,16 +4,17 @@
  * Description: KeibaDataCollector（JRAVAN+競馬最強の法則WEB 全自動AI競馬データシステム）から送られる
  *              AI指数TOP5・本日の傾向・狙い馬/穴馬/危険な人気馬を、開催場・日単位のカスタム投稿タイプ
  *              「keiba_digest」として受け取り、表示する。既存の Keiba Race Sync（race投稿）とは別。
- * Version: 0.7.3
+ * Version: 0.8.0
  */
 
 if (!defined('ABSPATH')) {
     exit;
 }
 
-define('KEIBA_AI_DIGEST_VERSION', '0.7.3');
+define('KEIBA_AI_DIGEST_VERSION', '0.8.0');
 
 require_once __DIR__ . '/includes/diagnosis.php';
+require_once __DIR__ . '/includes/legal-pages.php';
 define('KEIBA_AI_DIGEST_JSON_META_KEYS', array(
     'ai_index_top5',
     'trend_morning',
@@ -303,6 +304,7 @@ function keiba_ai_digest_render_settings_page()
         </p>
 
         <?php keiba_ai_digest_render_diagnosis_admin(); ?>
+        <?php keiba_legal_render_admin(); ?>
 
         <h2>監視ダッシュボード（仕様書§17）</h2>
         <?php keiba_ai_digest_render_status(); ?>
@@ -366,6 +368,14 @@ function keiba_ai_digest_render_status()
  * ------------------------------------------------------------------------- */
 
 add_action('wp_enqueue_scripts', function () {
+    if (is_page() && in_array((int) get_queried_object_id(), array_map('intval', (array) get_option('keiba_ai_digest_legal_page_ids', array())), true)) {
+        wp_enqueue_style(
+            'keiba-ai-digest-legal',
+            plugins_url('assets/keiba-legal.css', __FILE__),
+            array(),
+            KEIBA_AI_DIGEST_VERSION
+        );
+    }
     if (is_singular('keiba_digest') || is_post_type_archive('keiba_digest') || is_page('smartaigenerator')) {
         wp_enqueue_style(
             'keiba-ai-digest',

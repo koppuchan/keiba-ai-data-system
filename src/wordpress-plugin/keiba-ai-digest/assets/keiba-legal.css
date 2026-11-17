@@ -1,0 +1,56 @@
+/* 会社概要・特商法・プライバシーポリシー・利用規約の固定ページ */
+.keiba-legal-table {
+    width: 100%;
+    margin: 1em 0 1.5em;
+    border-collapse: collapse;
+}
+
+.keiba-legal-table th,
+.keiba-legal-table td {
+    padding: 0.7em 0.8em;
+    border: 1px solid #cfd8dc;
+    text-align: left;
+    vertical-align: top;
+    line-height: 1.7;
+}
+
+.keiba-legal-table thead th {
+    background: #eceff1;
+}
+
+.keiba-legal-table tbody th {
+    width: 30%;
+    background: #f5f7f8;
+    font-weight: bold;
+}
+
+@media (max-width: 600px) {
+    .keiba-legal-table thead {
+        display: none;
+    }
+
+    .keiba-legal-table,
+    .keiba-legal-table tbody,
+    .keiba-legal-table tr,
+    .keiba-legal-table th,
+    .keiba-legal-table td {
+        display: block;
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    .keiba-legal-table tr {
+        margin: 0 0 0.8em;
+        border: 1px solid #cfd8dc;
+    }
+
+    .keiba-legal-table th,
+    .keiba-legal-table td {
+        border: 0;
+    }
+
+    .keiba-legal-table tbody th {
+        width: 100%;
+        border-bottom: 1px solid #cfd8dc;
+    }
+}
