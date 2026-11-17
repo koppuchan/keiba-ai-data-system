@@ -617,8 +617,7 @@ add_shortcode('keiba_race_diagnosis', function () {
     ));
 
     return '<div id="keiba-diagnosis" class="keiba-diagnosis" aria-live="polite">'
-        . '<noscript>診断の利用にはJavaScriptを有効にしてください。</noscript></div>'
-        . keiba_legal_footer_links_html();
+        . '<noscript>診断の利用にはJavaScriptを有効にしてください。</noscript></div>';
 });
 
 /* ------------------------------------------------------------------------- *
