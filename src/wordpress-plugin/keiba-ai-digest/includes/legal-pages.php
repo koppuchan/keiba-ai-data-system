@@ -81,6 +81,17 @@ add_action('init', function () {
     }
 });
 
+/** 4つのページに目印のクラスを付ける（上の余白など、見た目の調整用）。 */
+add_filter('body_class', function ($classes) {
+    if (is_page()) {
+        $ids = array_map('intval', (array) get_option('keiba_ai_digest_legal_page_ids', array()));
+        if (in_array((int) get_queried_object_id(), $ids, true)) {
+            $classes[] = 'keiba-legal-page';
+        }
+    }
+    return $classes;
+});
+
 /** 診断ページの下に出す、4つのページへのリンク。ページが無い（削除された）ものは出さない。 */
 function keiba_legal_footer_links_html()
 {

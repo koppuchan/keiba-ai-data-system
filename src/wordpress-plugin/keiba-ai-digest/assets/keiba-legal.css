@@ -54,3 +54,16 @@
         border-bottom: 1px solid #cfd8dc;
     }
 }
+
+/* 本文の最初の段落が、パンくずリストに詰まって見えないように、上に余白を取る */
+.keiba-legal-page .entry-body,
+.keiba-legal-page .entry-content {
+    padding-top: 2.5em;
+}
+
+@media (max-width: 600px) {
+    .keiba-legal-page .entry-body,
+    .keiba-legal-page .entry-content {
+        padding-top: 1.5em;
+    }
+}
