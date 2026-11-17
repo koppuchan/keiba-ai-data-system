@@ -93,6 +93,19 @@ add_filter('body_class', function ($classes) {
 });
 
 /**
+ * フッターの文字色を白にそろえる。テーマの追加CSSが、メニュー項目のID（#menu-item-34 / #menu-item-35）だけを
+ * 白にしているため、あとから追加した会社概要などの項目が暗い灰色になり、背景（濃い緑）に溶けて読みにくかった。
+ * 項目のIDに頼らず、フッターのメニューと、下段の「Powered by ...」の表示を、まとめて白にする。
+ */
+add_action('wp_head', function () {
+    echo '<style id="keiba-ai-digest-footer">'
+        . 'footer.siteFooter .footerMenu a,footer.siteFooter .footerMenu a:visited,'
+        . 'footer.siteFooter .copySection,footer.siteFooter .copySection a,footer.siteFooter .copySection a:visited{color:#fff}'
+        . 'footer.siteFooter .footerMenu a:hover,footer.siteFooter .copySection a:hover{color:#fff;text-decoration:underline}'
+        . '</style>';
+}, 100);
+
+/**
  * 旧「運営者情報・免責事項」ページ（内容が新しい「会社概要」と重複するため削除した）のアドレスに来た人を、
  * 新しい会社概要のページへ恒久的に転送する（外部やブックマークからのリンク切れを防ぐ）。
  * 該当のアドレスが404になっている場合だけ働く（旧ページが残っているうちは何もしない）。
