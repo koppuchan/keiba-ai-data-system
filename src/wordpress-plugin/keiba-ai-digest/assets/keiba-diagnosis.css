@@ -217,3 +217,21 @@
 .keiba-diagnosis .kdg-line-panel {
     margin: 0 0 0.7em;
 }
+
+/* 診断ページの下の、会社概要などへのリンク */
+.keiba-legal-links {
+    max-width: 640px;
+    margin: 1.5em auto 0;
+    padding-top: 1em;
+    border-top: 1px solid #e0e6eb;
+    font-size: 0.85em;
+}
+
+.keiba-legal-links ul {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4em 1.2em;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
