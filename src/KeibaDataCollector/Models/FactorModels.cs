@@ -26,6 +26,8 @@ namespace KeibaDataCollector.Models
         public int Chakujun { get; set; }             // 確定着順（0=非確定/取消等）
         public double? TanshoOdds { get; set; }
         public double? Agari3F { get; set; }          // 後3ハロンタイム(秒)
+        public double? SohaTime { get; set; }         // 走破タイム(秒)。SEのTime由来。取消・中止等はnull
+        public string BabaCode { get; set; }          // 馬場状態コード(1良/2稍重/3重/4不良)。RAのTenkoBabaを芝/ダートで選んだもの
         public string CornerPassage4 { get; set; }    // 最終コーナー通過順位（生値。展開分析用）
 
         /// <summary>その馬の「最も早いコーナー」通過順位を、(出走頭数-1)で正規化した0〜1の値。

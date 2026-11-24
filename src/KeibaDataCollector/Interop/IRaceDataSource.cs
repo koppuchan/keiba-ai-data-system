@@ -29,6 +29,17 @@ namespace KeibaDataCollector.Interop
         int OpenRealtime(string dataSpec, string key);
     }
 
+    /// <summary>読み込み中の壊れたファイルを飛ばす／消すための任意機能（JVSkip / JVFileDelete 相当）。
+    /// 履歴取り込みが途中の読み込みエラーで止まり、毎晩同じ場所で止まる事態を避けるために使う。</summary>
+    public interface IRaceFileSkipper
+    {
+        /// <summary>現在のファイルの残りを読み飛ばして次のファイルへ進む（JVSkip）。</summary>
+        void SkipCurrentFile();
+
+        /// <summary>壊れたファイルを削除する。次回のJVOpenで取り直される（JVFileDelete）。戻り値は仕様書のとおり。</summary>
+        int DeleteFile(string fileName);
+    }
+
     public class OpenResult
     {
         public int ReturnCode { get; set; }

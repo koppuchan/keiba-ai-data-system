@@ -22,7 +22,7 @@ namespace KeibaDataCollector.Interop
     /// 実行時にCOMイベント（JVWatchEvent等）を使う場合は後期バインドでは購読できないため、
     /// このクラスではポーリング方式（Read()を一定間隔で呼ぶ）を前提にしている。
     /// </summary>
-    public class JvSpecComDataSource : IRaceDataSource
+    public class JvSpecComDataSource : IRaceDataSource, IRaceFileSkipper
     {
         private readonly string _progId;
         private readonly string _methodPrefix;
@@ -242,6 +242,10 @@ namespace KeibaDataCollector.Interop
             fileName = args[2] as string ?? string.Empty;
             return rc;
         }
+
+        public void SkipCurrentFile() => Invoke("Skip");
+
+        public int DeleteFile(string fileName) => (int)Invoke("FileDelete", fileName);
 
         public int OpenRealtime(string dataSpec, string key)
         {
