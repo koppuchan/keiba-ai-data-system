@@ -420,6 +420,22 @@ namespace KeibaDataCollector.Data
                     Console.WriteLine($"複勝払戻あり={withPayout}件（3着以内の行数={placed}件。この2つが近ければHR反映は成功）");
                 }
             }
+            // soha_time / baba_code の埋まり具合（JRA=競馬場コード01〜10 / 地方=それ以外）。
+            // 着順が付いた行（chakujun>=1）に対する割合を見る。出走前の行はNULLで正しい。
+            Console.WriteLine("soha_time / baba_code（着順確定済みの行に対する埋まり具合）:");
+            using (var cmd = new SQLiteCommand(@"
+                SELECT CASE WHEN CAST(track_code AS INTEGER) BETWEEN 1 AND 10 THEN 'JRA' ELSE '地方' END,
+                       COUNT(*),
+                       SUM(CASE WHEN soha_time IS NOT NULL THEN 1 ELSE 0 END),
+                       SUM(CASE WHEN baba_code IS NOT NULL THEN 1 ELSE 0 END),
+                       MIN(CASE WHEN soha_time IS NOT NULL THEN race_date END),
+                       MAX(race_date)
+                FROM race_entries WHERE chakujun >= 1 GROUP BY 1;", _conn))
+            using (var r = cmd.ExecuteReader())
+            {
+                while (r.Read())
+                    Console.WriteLine($"  {r.GetString(0)}: 着順あり{r.GetInt64(1)}行 / soha_timeあり{r.GetInt64(2)}行 / baba_codeあり{r.GetInt64(3)}行 / soha_time最古={ReadOrNull(r, 4)} / 着順ありの最新日={ReadOrNull(r, 5)}");
+            }
             Console.WriteLine("競馬場コード別内訳（上位20）:");
             using (var cmd = new SQLiteCommand(
                 "SELECT track_code, COUNT(*) c, MIN(race_date), MAX(race_date) FROM race_entries " +
