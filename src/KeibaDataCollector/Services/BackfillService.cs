@@ -60,6 +60,16 @@ namespace KeibaDataCollector.Services
         // 1件ずつコミットすると数百万件規模でfsyncがボトルネックになり現実的な時間で終わらない。
         private const int BatchSize = 5000;
 
+        // 読み込みエラーで飛ばしてよいファイル数の上限。これを超えたら異常として中断する。
+        private const int MaxReadErrors = 30;
+
+        // -3（ダウンロード中）が連続して続いたときの待ち上限。履歴取り込みは1ファイルが大きく
+        // 時間がかかるので長めだが、無限には待たない（以前は上限なしで永遠に固まりえた）。
+        private static readonly TimeSpan MaxDownloadWait = TimeSpan.FromMinutes(15);
+
+        private static bool IsCentralTrack(string trackCode) =>
+            int.TryParse(trackCode, out var c) && c >= 1 && c <= 10;
+
         /// <param name="dataOption">上の_dataOptionのコメント参照。省略時はSetup(全履歴・手動実行用)。</param>
         public BackfillService(IRaceDataSource source, HistoricalDataStore store,
             DataOption dataOption = DataOption.Setup)
@@ -102,7 +112,7 @@ namespace KeibaDataCollector.Services
             // レースキー(日付+場コード+R番号)ごとの距離・トラック種別・最も早いコーナー/最終コーナーの
             // 通過順位（先頭からの馬番配列）。前者は②テン速度・展開用、後者はTrend Engine（仕様書§10）
             // の通過順傾向用。RA到着時に埋め、SE処理時に参照する。
-            var raceInfoByKey = new Dictionary<string, (int Distance, string TrackSurfaceCode, int[] EarliestCornerOrder, int[] LatestCornerOrder)>();
+            var raceInfoByKey = new Dictionary<string, (int Distance, string TrackSurfaceCode, int[] EarliestCornerOrder, int[] LatestCornerOrder, string BabaCode)>();
 
             // HR（払戻）はここに溜めるだけにして、ストリーム読み込みが全部終わった後にまとめて
             // race_entriesへ反映する。理由: 実機診断で「HRはRA→SE→HRの順で来る」という前提が
@@ -114,19 +124,57 @@ namespace KeibaDataCollector.Services
             var pendingFukusho = new List<(DateTime RaceDate, string TrackCode, int RaceNumber, int Umaban, double Amount)>();
 
             int totalRecords = 0, seRecords = 0, raRecords = 0, hrRecords = 0, missingRaInfo = 0;
+            int readErrors = 0;
+            string lastFile = string.Empty;
+            var downloadWait = new DownloadWait(MaxDownloadWait);
+            // 取り込めた範囲の確認用（JRA=競馬場コード01〜10 / 地方=それ以外）。ログだけで
+            // 「どこまで取れたか」が分かるようにする（以前は日付範囲が出ず、止まっても気づけなかった）。
+            var rangeByGroup = new Dictionary<string, (DateTime Min, DateTime Max, int Rows)>();
             int hrAnyPayoutEntries = 0, hrFukushoSeen = 0, hrFukushoUnparseable = 0, hrFukushoSampleLogged = 0;
             var batch = _store.BeginBatch();
             try
             {
                 while (true)
                 {
-                    int size = _source.Read(out var buffer, out _);
+                    int size = _source.Read(out var buffer, out var readFile);
                     if (size == 0) break;
                     if (size == -1) continue;
-                    if (size == -3) { System.Threading.Thread.Sleep(500); continue; }
+                    if (size == -3) { downloadWait.Wait(); continue; }
+                    downloadWait.Reset();
                     if (size < 0)
-                        throw new InvalidOperationException($"{_source.SourceName} Read failed: {size}");
+                    {
+                        // 以前はここで例外にして取り込み全体を止めていた。RACEは古い日付から順に流れるため、
+                        // 途中の壊れたファイル1つで、それより新しい日付が毎晩ずっと取り込まれなくなる
+                        // （JRAが10/12で止まり、歯抜けになった原因の有力候補）。壊れたファイルだけ
+                        // 読み飛ばして続行し、件数をログに残す。
+                        readErrors++;
+                        Console.WriteLine($"[{_source.SourceName}] RACE Read失敗: code={size} file={lastFile} " +
+                                          $"（{readErrors}件目。このファイルを飛ばして続行します）");
+                        if (readErrors > MaxReadErrors)
+                            throw new InvalidOperationException(
+                                $"{_source.SourceName} Read failed: {size}（読み込みエラーが{MaxReadErrors}件を超えたため中断）");
+                        if (_source is IRaceFileSkipper skipper)
+                        {
+                            try
+                            {
+                                // -402/-403はダウンロード済みファイルの破損。削除すれば次回JVOpenで取り直される。
+                                if (size == -402 || size == -403) skipper.DeleteFile(lastFile);
+                                skipper.SkipCurrentFile();
+                            }
+                            catch (Exception ex)
+                            {
+                                throw new InvalidOperationException(
+                                    $"{_source.SourceName} Read failed: {size}（ファイルの読み飛ばしにも失敗: {ex.Message}）");
+                            }
+                        }
+                        else
+                        {
+                            throw new InvalidOperationException($"{_source.SourceName} Read failed: {size}");
+                        }
+                        continue;
+                    }
                     totalRecords++;
+                    if (!string.IsNullOrEmpty(readFile)) lastFile = readFile;
 
                     var typeId = JvRecordParser.GetRecordTypeId(buffer);
 
@@ -137,7 +185,8 @@ namespace KeibaDataCollector.Services
                         ra.SetDataB(ref buffer);
                         var key = RaceInfoKey(ra.id.Year, ra.id.MonthDay, ra.id.JyoCD, ra.id.RaceNum);
                         raceInfoByKey[key] = (SafeInt(ra.Kyori), Trim(ra.TrackCD),
-                            JvFactorRecordParser.ParseEarliestCornerOrder(ra), JvFactorRecordParser.ParseLatestCornerOrder(ra));
+                            JvFactorRecordParser.ParseEarliestCornerOrder(ra), JvFactorRecordParser.ParseLatestCornerOrder(ra),
+                            BabaCodeFor(Trim(ra.TrackCD), ra.TenkoBaba));
                     }
                     else if (typeId == "SE")
                     {
@@ -149,7 +198,7 @@ namespace KeibaDataCollector.Services
                         if (!raceInfoByKey.TryGetValue(key, out var raceInfo))
                         {
                             missingRaInfo++;
-                            raceInfo = (0, string.Empty, Array.Empty<int>(), Array.Empty<int>());
+                            raceInfo = (0, string.Empty, Array.Empty<int>(), Array.Empty<int>(), null);
                         }
 
                         var umaban = SafeInt(se.Umaban);
@@ -168,13 +217,23 @@ namespace KeibaDataCollector.Services
                             Chakujun = SafeInt(se.KakuteiJyuni),
                             TanshoOdds = SafeOddsTenths(se.Odds),
                             Agari3F = SafeOddsTenths(se.HaronTimeL3),
+                            SohaTime = ParseFinishTimeSeconds(se.Time),
+                            BabaCode = raceInfo.BabaCode,
                             CornerPassage4 = null, // コーナー通過はRA側の配列。必要になれば別テーブルに分離する。
                             EarlyPositionRatio = ComputeEarlyPositionRatio(raceInfo.EarliestCornerOrder, umaban),
                             IsFinalCornerLeader = ComputeIsFinalCornerLeader(raceInfo.LatestCornerOrder, umaban),
                         };
 
                         if (!string.IsNullOrEmpty(entry.KettoNum) && entry.RaceDate != DateTime.MinValue)
+                        {
                             _store.UpsertRaceEntry(entry);
+                            var group = IsCentralTrack(entry.TrackCode) ? "JRA" : "地方";
+                            rangeByGroup.TryGetValue(group, out var rg);
+                            rangeByGroup[group] = rg.Rows == 0
+                                ? (entry.RaceDate, entry.RaceDate, 1)
+                                : (entry.RaceDate < rg.Min ? entry.RaceDate : rg.Min,
+                                   entry.RaceDate > rg.Max ? entry.RaceDate : rg.Max, rg.Rows + 1);
+                        }
                     }
                     else if (typeId == "HR")
                     {
@@ -228,6 +287,10 @@ namespace KeibaDataCollector.Services
             Console.WriteLine(
                 $"[{_source.SourceName}] RACE取り込み完了: 全{totalRecords}件, SE={seRecords}, RA={raRecords}, HR={hrRecords}, " +
                 $"RA情報未取得のままのSE={missingRaInfo}（RAより先にSEが来た/開催情報が別範囲だった等の可能性）");
+            foreach (var kv in rangeByGroup)
+                Console.WriteLine(
+                    $"[{_source.SourceName}] RACE取り込み範囲({kv.Key}): {kv.Value.Min:yyyy-MM-dd}〜{kv.Value.Max:yyyy-MM-dd}, " +
+                    $"{kv.Value.Rows}行, 読み込みエラーで飛ばしたファイル={readErrors}件");
             Console.WriteLine(
                 $"[{_source.SourceName}] HR診断: HR内の全券種払戻エントリ数={hrAnyPayoutEntries}件, " +
                 $"うち複勝エントリ={hrFukushoSeen}件, 複勝のうち馬番がパースできなかった数={hrFukushoUnparseable}件, " +
@@ -521,6 +584,42 @@ namespace KeibaDataCollector.Services
             if (t.Length == 0 || !int.TryParse(t, out var v) || v == 0) return null;
             return v / 10.0;
         }
+
+        /// <summary>SEレコードの走破タイム（"mssd" 4桁: 分1桁+秒2桁+1/10秒1桁。"1234"=1:23.4）を秒に換算する。
+        /// 空・全0・数字以外（取消・中止・除外等）はnull。</summary>
+        internal static double? ParseFinishTimeSeconds(string s)
+        {
+            var t = Trim(s);
+            if (t.Length != 4) return null;
+            foreach (var c in t) if (c < '0' || c > '9') return null;
+            var minutes = t[0] - '0';
+            var seconds = (t[1] - '0') * 10 + (t[2] - '0');
+            var tenths = t[3] - '0';
+            if (seconds >= 60) return null;
+            var total = minutes * 60 + seconds + tenths / 10.0;
+            return total > 0 ? total : (double?)null;
+        }
+
+        /// <summary>RAのTenkoBabaから、そのレースの馬場状態コード(1良/2稍重/3重/4不良)を取り出す。
+        /// トラックコードの先頭桁が1x=芝なら芝馬場、2x=ダートならダート馬場を使う
+        /// （FactorPublishServiceと同じ判定）。障害(5x)等はどちらかが入っているので、
+        /// 芝馬場コードが有効ならそれ、無ければダート側を使う。0/空/範囲外は不明としてnull。</summary>
+        internal static string BabaCodeFor(string trackSurfaceCode, TENKO_BABA_INFO tenkoBaba)
+        {
+            if (string.IsNullOrEmpty(trackSurfaceCode)) return null;
+            var siba = Trim(tenkoBaba.SibaBabaCD);
+            var dirt = Trim(tenkoBaba.DirtBabaCD);
+            string code;
+            switch (trackSurfaceCode[0])
+            {
+                case '1': code = siba; break;
+                case '2': code = dirt; break;
+                default: code = IsValidBaba(siba) ? siba : dirt; break;
+            }
+            return IsValidBaba(code) ? code : null;
+        }
+
+        private static bool IsValidBaba(string c) => c.Length == 1 && c[0] >= '1' && c[0] <= '4';
 
         private static int SafeInt(string s)
         {
