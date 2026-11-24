@@ -148,7 +148,10 @@ namespace KeibaDataCollector.Services
                         // （JRAが10/12で止まり、歯抜けになった原因の有力候補）。壊れたファイルだけ
                         // 読み飛ばして続行し、件数をログに残す。
                         readErrors++;
-                        Console.WriteLine($"[{_source.SourceName}] RACE Read失敗: code={size} file={lastFile} " +
+                        // エラーを返した呼び出し側のファイル名を優先する。取れなければ直前に読めたファイル
+                        // （違っていても、正常ファイルを消すだけで次回JVOpenで取り直されるので害は小さい）。
+                        var badFile = !string.IsNullOrEmpty(readFile) ? readFile : lastFile;
+                        Console.WriteLine($"[{_source.SourceName}] RACE Read失敗: code={size} file={badFile} " +
                                           $"（{readErrors}件目。このファイルを飛ばして続行します）");
                         if (readErrors > MaxReadErrors)
                             throw new InvalidOperationException(
@@ -158,7 +161,7 @@ namespace KeibaDataCollector.Services
                             try
                             {
                                 // -402/-403はダウンロード済みファイルの破損。削除すれば次回JVOpenで取り直される。
-                                if (size == -402 || size == -403) skipper.DeleteFile(lastFile);
+                                if (size == -402 || size == -403) skipper.DeleteFile(badFile);
                                 skipper.SkipCurrentFile();
                             }
                             catch (Exception ex)
