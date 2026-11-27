@@ -1,4 +1,4 @@
-/* 今日の狙い目レース診断（スマホ優先） */
+/* あなたに合った競馬レース診断（スマホ優先） */
 .keiba-diagnosis {
     max-width: 640px;
     margin: 0 auto;
@@ -234,4 +234,17 @@
     margin: 0;
     padding: 0;
     list-style: none;
+}
+
+/* 選択肢の下に出す、本日の開催状況 */
+.keiba-diagnosis .kdg-option-sub {
+    display: block;
+    margin-top: 0.2em;
+    font-size: 0.8em;
+    font-weight: normal;
+    color: #546e7a;
+}
+
+.keiba-diagnosis .kdg-note-first {
+    margin-top: 0;
 }
