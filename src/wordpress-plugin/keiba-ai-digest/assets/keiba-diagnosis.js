@@ -1,4 +1,4 @@
-/* 今日の狙い目レース診断（スマホ優先）。質問は1画面1問、回答はタップだけ。 */
+/* あなたに合った競馬レース診断（スマホ優先）。質問は1画面1問、回答はタップだけ。 */
 (function () {
     'use strict';
 
@@ -11,7 +11,7 @@
     var QUESTIONS = [
         {
             key: 's',
-            title: '今日の競馬で重視したいのは？',
+            title: '競馬で重視したいのは？',
             options: [['hit', '的中率を重視'], ['ana', '穴馬を狙いたい'], ['high', '高配当を狙いたい'], ['ai', 'AIの総合評価を重視']]
         },
         {
@@ -26,7 +26,7 @@
         },
         {
             key: 'c',
-            title: '今日予想したい競馬は？',
+            title: '予想したい競馬は？',
             options: [['central', '中央競馬'], ['local', '地方競馬'], ['both', 'どちらでもよい']]
         }
     ];
@@ -52,14 +52,20 @@
 
     function track(name) {
         var gaName = 'diagnosis_' + name;
+        var params = { event_category: 'diagnosis' };
+        // 通常の診断結果と代替診断結果を区別できるよう、結果の種類を付ける（result_normal / result_fallback）。
+        var kind = /_(normal|fallback)$/.exec(name);
+        if (kind) {
+            params.result_type = kind[1];
+        }
         try {
             if (typeof window.gtag === 'function') {
-                window.gtag('event', gaName, { event_category: 'diagnosis' });
+                window.gtag('event', gaName, params);
             } else {
                 // WP Rocket等でGA4のタグの読み込みが遅らされている場合に備え、gtag形式（arguments）でキューへ積む。
                 // タグが読み込まれた時点で順に処理される。
                 window.dataLayer = window.dataLayer || [];
-                (function () { window.dataLayer.push(arguments); })('event', gaName, { event_category: 'diagnosis' });
+                (function () { window.dataLayer.push(arguments); })('event', gaName, params);
             }
             if (window.dataLayer && typeof window.dataLayer.push === 'function') {
                 window.dataLayer.push({ event: gaName }); // Googleタグマネージャー用
@@ -77,6 +83,47 @@
                 xhr.send(body);
             }
         } catch (e) { /* 同上 */ }
+    }
+
+    /* ---------------------------------------------------------------- 本日の開催状況（選択画面に表示） */
+
+    var statusPromise = null;
+
+    function loadStatus() {
+        if (!statusPromise) {
+            statusPromise = fetch(cfg.statusUrl, { credentials: 'same-origin', cache: 'no-store' })
+                .then(function (res) {
+                    if (!res.ok) {
+                        throw new Error('status ' + res.status);
+                    }
+                    return res.json();
+                })
+                .catch(function () {
+                    return null; // 取得できなくても診断は続けられる（表示を省くだけ）。
+                });
+        }
+        return statusPromise;
+    }
+
+    function statusText(info, isBoth) {
+        if (!info) {
+            return '';
+        }
+        if (isBoth) {
+            return info.remaining > 0
+                ? '本日診断できるレース ' + info.remaining + 'レース'
+                : '本日はこれから診断できるレースがありません（あなたに合ったスタイルをご案内します）';
+        }
+        switch (info.state) {
+            case 'open':
+                return '本日開催中・診断できるレース ' + info.remaining + 'レース';
+            case 'ended':
+                return '本日の開催は終了しました';
+            case 'preparing':
+                return '本日のデータを準備中です';
+            default:
+                return '本日の開催はありません';
+        }
     }
 
     /* ---------------------------------------------------------------- 描画の補助 */
@@ -120,9 +167,9 @@
     function showIntro() {
         clear();
         var box = el('div', 'kdg-card kdg-intro');
-        box.appendChild(el('p', 'kdg-catch', '今日、狙うならどのレース？'));
+        box.appendChild(el('p', 'kdg-catch', 'あなたに合うレースはどれ？'));
         box.appendChild(el('h2', 'kdg-title', '30秒でわかる無料競馬診断'));
-        box.appendChild(el('p', 'kdg-lead', '4つの質問に答えるだけ。AI指数のデータから、これから発走するレースの中で、あなたに合った注目レースをご紹介します。'));
+        box.appendChild(el('p', 'kdg-lead', '4つの質問に答えるだけ。AI指数のデータから、あなたに合った注目レースや、あなたの競馬スタイルをご紹介します。'));
         box.appendChild(button('無料診断スタート', 'kdg-btn kdg-btn-primary', function () {
             track('start');
             answers = {};
@@ -155,8 +202,9 @@
         box.appendChild(el('h2', 'kdg-question', q.title));
 
         var list = el('div', 'kdg-options');
+        var optionButtons = {};
         q.options.forEach(function (option) {
-            list.appendChild(button(option[1], 'kdg-btn kdg-option', function () {
+            var optionButton = button(option[1], 'kdg-btn kdg-option', function () {
                 answers[q.key] = option[0];
                 if (step + 1 < QUESTIONS.length) {
                     step += 1;
@@ -164,9 +212,26 @@
                 } else {
                     runDiagnosis();
                 }
-            }));
+            });
+            optionButtons[option[0]] = optionButton;
+            list.appendChild(optionButton);
         });
         box.appendChild(list);
+
+        if (q.key === 'c') {
+            // 中央・地方の選択画面に、本日の開催有無と診断できるレース数を表示する。
+            loadStatus().then(function (status) {
+                if (!status || !optionButtons.central || !list.parentNode) {
+                    return;
+                }
+                [['central', false], ['local', false], ['both', true]].forEach(function (pair) {
+                    var text = statusText(status[pair[0]], pair[1]);
+                    if (text && optionButtons[pair[0]]) {
+                        optionButtons[pair[0]].appendChild(el('span', 'kdg-option-sub', text));
+                    }
+                });
+            });
+        }
 
         if (step > 0) {
             box.appendChild(button('← 前の質問に戻る', 'kdg-btn kdg-btn-link', function () {
@@ -196,7 +261,7 @@
      * onlyIfUnlocked=true は、LINE解放済みの人にだけ前回の結果を自動表示する（未解放ならトップへ）。
      * 解放済みかどうかはHTMLに埋めず、サーバーの応答で判定する（ページキャッシュで他の人の状態が混ざらないように）。
      */
-    function runDiagnosis(restored, onlyIfUnlocked) {
+    function runDiagnosis(restored, onlyIfUnlocked, recheck) {
         clear();
         var box = el('div', 'kdg-card');
         box.appendChild(el('p', 'kdg-loading', 'AI指数のデータを確認しています…'));
@@ -218,15 +283,17 @@
                     showIntro();
                     return;
                 }
-                if (!restored) {
+                if (recheck) {
+                    track('recheck'); // 条件を変えた再診断。診断完了の数には足さない。
+                } else if (!restored) {
                     track('complete');
                 }
                 save(answers);
-                if (data.status === 'preparing') {
-                    showMessage('診断データを準備中です', '本日のAI指数のデータがまだそろっていません。しばらくしてからもう一度お試しください。', false);
-                } else if (data.status === 'none') {
-                    showMessage('いま、条件に合うレースが見つかりませんでした',
-                        'これから発走するレースの中に、あなたの条件に合う基準以上のレースがありませんでした。条件を変えると見つかることがあります。', true);
+                if (!restored) {
+                    track(data.status === 'fallback' ? 'result_fallback' : 'result_normal');
+                }
+                if (data.status === 'fallback') {
+                    showFallback(data);
                 } else {
                     showResult(data);
                 }
@@ -234,6 +301,87 @@
             .catch(function () {
                 showMessage('診断を取得できませんでした', '通信に失敗しました。時間をおいてもう一度お試しください。', true);
             });
+    }
+
+    /** LINE友だち追加ボタン。kind（normal / fallback）で、通常の診断結果と代替診断結果のクリックを区別して計測する。 */
+    function friendAddButton(label, className, kind) {
+        if (!cfg.addFriendUrl) {
+            return null;
+        }
+        var a = el('a', className, label);
+        a.href = cfg.addFriendUrl;
+        a.target = '_blank';
+        a.rel = 'noopener';
+        a.addEventListener('click', function () {
+            track('line_click');
+            track('line_click_' + kind);
+        });
+        return a;
+    }
+
+    var COURSE_AGAIN_LABELS = { central: '中央競馬で診断する', local: '地方競馬で診断する', both: '中央・地方の両方で診断する' };
+
+    /**
+     * 診断できるレースが無いとき（開催のない日、全レース終了後、データ準備中）の代替診断。
+     * 回答を引き継いだまま、中央・地方の条件を変えて再診断できる。
+     */
+    function showFallback(data) {
+        clear();
+        var fb = data.fallback;
+        var wrap = el('div', 'kdg-result');
+
+        var head = el('div', 'kdg-card kdg-result-head');
+        head.appendChild(el('p', 'kdg-catch', 'あなたに合った競馬スタイル'));
+        head.appendChild(el('h2', 'kdg-type', '「' + fb.styleName + '」'));
+        head.appendChild(el('p', 'kdg-lead', fb.lead));
+        head.appendChild(el('p', 'kdg-note', '診断タイプ：' + data.type));
+        wrap.appendChild(head);
+
+        var notice = data.reason === 'preparing'
+            ? '本日のレースデータを準備中のため、あなたの回答から競馬スタイルをお届けしています。'
+            : 'いま診断できるレースがないため、あなたの回答から競馬スタイルをお届けしています。';
+        var guide = el('div', 'kdg-card');
+        guide.appendChild(el('p', 'kdg-note kdg-note-first', notice));
+        guide.appendChild(el('p', 'kdg-reason-title', 'あなたに合った見方'));
+        var ul = el('ul', 'kdg-reasons');
+        fb.points.forEach(function (point) {
+            ul.appendChild(el('li', null, point));
+        });
+        guide.appendChild(ul);
+        guide.appendChild(el('p', 'kdg-lead', fb.next));
+        wrap.appendChild(guide);
+
+        // 再診断：これまでの回答はそのままに、中央・地方だけ変えてもう一度診断する。
+        var again = el('div', 'kdg-card');
+        again.appendChild(el('p', 'kdg-reason-title', '条件を変えて、もう一度診断する（回答はそのまま）'));
+        ['central', 'local', 'both'].forEach(function (course) {
+            if (course === answers.c) {
+                return;
+            }
+            again.appendChild(button(COURSE_AGAIN_LABELS[course], 'kdg-btn kdg-btn-primary', function () {
+                answers.c = course;
+                runDiagnosis(false, false, true);
+            }));
+        });
+        wrap.appendChild(again);
+
+        // LINE登録への導線（代替診断にも必ず置く）。
+        var cta = el('div', 'kdg-card kdg-cta');
+        cta.appendChild(el('p', 'kdg-cta-title', 'LINE登録で、開催日のAI指数をチェック！'));
+        cta.appendChild(el('p', 'kdg-lead', 'LINE公式アカウントを友だち追加すると、開催日のAI指数や注目馬などの詳細情報をご覧いただけます。'));
+        var line = friendAddButton('LINE登録で詳細情報をチェック（無料）', 'kdg-btn kdg-btn-line', 'fallback');
+        cta.appendChild(line || el('p', 'kdg-note', 'LINEのご案内は準備中です。'));
+        var gen = el('a', 'kdg-btn kdg-btn-secondary', 'スマートAI予想ジェネレーターでレースを分析する →');
+        gen.href = cfg.generatorUrl;
+        gen.target = '_blank';
+        gen.rel = 'noopener';
+        cta.appendChild(gen);
+        wrap.appendChild(cta);
+
+        wrap.appendChild(button('最初から診断し直す', 'kdg-btn kdg-btn-link', showIntro));
+        wrap.appendChild(disclaimer());
+        root.appendChild(wrap);
+        scrollTop();
     }
 
     function showResult(data) {
@@ -252,7 +400,7 @@
         var details = [];
         data.items.forEach(function (item, index) {
             var card = el('div', 'kdg-card kdg-race' + (index === 0 ? ' kdg-race-main' : ''));
-            card.appendChild(el('p', 'kdg-catch', index === 0 ? 'あなたの今日の狙い目レース' : '他の注目レース'));
+            card.appendChild(el('p', 'kdg-catch', index === 0 ? 'あなたに合ったレース' : '他の注目レース'));
 
             var title = el('h3', 'kdg-race-title');
             title.appendChild(document.createTextNode(item.venue + ' ' + item.raceNumber + 'R'));
@@ -315,32 +463,18 @@
             });
         }
 
-        function friendAddButton(label, className) {
-            if (!cfg.addFriendUrl) {
-                return null;
-            }
-            var a = el('a', className, label);
-            a.href = cfg.addFriendUrl;
-            a.target = '_blank';
-            a.rel = 'noopener';
-            a.addEventListener('click', function () {
-                track('line_click');
-            });
-            return a;
-        }
-
         if (data.unlocked) {
             track('detail_view');
             renderDetails();
             cta.appendChild(el('p', 'kdg-cta-title', '詳細をご覧いただけます'));
-            var more = friendAddButton('LINE友だち追加がまだの方はこちら（無料）', 'kdg-btn kdg-btn-line');
+            var more = friendAddButton('LINE友だち追加がまだの方はこちら（無料）', 'kdg-btn kdg-btn-line', 'normal');
             if (more) {
                 cta.appendChild(more);
             }
         } else {
             cta.appendChild(el('p', 'kdg-cta-title', 'あなた向けの注目馬・AI指数を無料公開中！'));
             cta.appendChild(el('p', 'kdg-lead', '本命馬・注目穴馬・危険な人気馬・AI指数などの詳細は、LINE登録後にご覧いただけます。'));
-            var line = friendAddButton('LINE登録で診断結果の詳細をチェック', 'kdg-btn kdg-btn-line');
+            var line = friendAddButton('LINE登録で診断結果の詳細をチェック', 'kdg-btn kdg-btn-line', 'normal');
             var open = button('本命馬・穴馬・AI指数などの詳細を見る', 'kdg-btn kdg-btn-primary', function () {
                 track('detail_click');
                 open.hidden = true;
