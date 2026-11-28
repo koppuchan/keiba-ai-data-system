@@ -400,6 +400,14 @@ namespace KeibaDataCollector
                             var publisher = new DigestPublisherService(wp, licenseGateStore, predictionStore);
                             RunContentFor(cycleSource, scoresStore, trendStore, validator, publisher, cycleDate, shared);
                             lap("公開");
+
+                            // 4) 診断用の次回開催データ。数時間に1回だけ、周期に余裕があるときだけ行う。
+                            //    失敗しても今日の更新には影響させない。
+                            if (cycleDate == DateTime.Today && timer.Elapsed < TimeSpan.FromMinutes(12))
+                            {
+                                RunPreviewFor(cycleSource, sourceName, store, scoresStore, licenseGateStore, wp, cycleDate);
+                                lap("次回開催");
+                            }
                         }
                         break;
                     }
@@ -788,6 +796,78 @@ namespace KeibaDataCollector
             catch (Exception ex)
             {
                 LogFailure(source.SourceName, "本日の傾向の算出に失敗（このソースのみスキップして続行）", ex);
+            }
+        }
+
+        // 次回開催の診断用データを作り直す間隔。出馬表は開催前に確定していくが、1日に何度も変わらない。
+        private static readonly TimeSpan PreviewInterval = TimeSpan.FromHours(3);
+        // 次の開催日がまだ見つからないとき（出馬表の公開前）の再確認間隔。
+        private static readonly TimeSpan PreviewNotFoundInterval = TimeSpan.FromMinutes(60);
+
+        /// <summary>診断の「次回開催」用に、今日より後の最も近い開催日のAI指数・候補馬をWordPressへ送る。
+        /// 通常のダイジェスト記事は作らず、予想の記録（predictions）にも残さない（公開前の参考情報のため）。
+        /// 人気・オッズは発売前で取れないので使わない。LicenseGateと自動公開のON/OFFは通常の公開と同じ条件で守る。</summary>
+        private static void RunPreviewFor(JvSpecComDataSource source, string sourceName, HistoricalDataStore store,
+            ScoresStore scoresStore, LicenseGateStore licenseGate, WordPressClient wp, DateTime today)
+        {
+            var stamp = System.IO.Path.Combine(
+                System.IO.Path.GetDirectoryName(AppConfig.HistoricalDbPath) ?? ".", $"preview-{sourceName}.stamp");
+            try
+            {
+                if (System.IO.File.Exists(stamp))
+                {
+                    var interval = System.IO.File.ReadAllText(stamp).Trim() == "notfound" ? PreviewNotFoundInterval : PreviewInterval;
+                    if (DateTime.Now - System.IO.File.GetLastWriteTime(stamp) < interval) return;
+                }
+
+                source.Initialize(AppConfig.JvLinkSoftwareId);
+                var isCentral = source.SourceName.Contains("中央");
+
+                var next = RaceDiscovery.NextRaceDay(source, today);
+                if (next == null)
+                {
+                    Console.WriteLine($"[{source.SourceName}] 次回開催: 今日より後の開催日がまだ見つかりません（出馬表の公開前）。");
+                    System.IO.File.WriteAllText(stamp, "notfound");
+                    return;
+                }
+                var nextDate = next.Value.Date;
+                Console.WriteLine($"[{source.SourceName}] 次回開催: {nextDate:yyyy-MM-dd} 場={string.Join(",", next.Value.TrackCodes)}");
+
+                if (!wp.IsAutoPublishEnabledAsync().GetAwaiter().GetResult())
+                {
+                    Console.WriteLine($"[{source.SourceName}] 次回開催: 自動公開がOFFのため送信しません。");
+                    System.IO.File.WriteAllText(stamp, "done");
+                    return;
+                }
+
+                var shared = new CachingRaceSource(source, nextDate);
+                new FactorPublishService(shared, new FactorScoringService(store), scoresStore).RunForToday(nextDate);
+
+                var generator = new ContentGeneratorService(shared, scoresStore) { FetchOdds = false };
+                var sent = 0;
+                foreach (var trackCode in next.Value.TrackCodes)
+                {
+                    if (!licenseGate.IsWebPublishAllowed(trackCode, isCentral)) continue;
+
+                    generator.GenerateForVenue(nextDate, trackCode);
+                    var races = generator.LastRaceSummaries;
+                    // 公開前の参考情報なので、検証を通っていない「狙い馬」等の役割は付けない。
+                    foreach (var race in races)
+                        foreach (var candidate in race.Candidates)
+                            candidate.Roles = new List<string>();
+                    if (races.Count == 0) continue;
+
+                    wp.UpsertDiagnosisPreviewAsync(nextDate, trackCode, races).GetAwaiter().GetResult();
+                    sent++;
+                    Console.WriteLine($"[{source.SourceName}] 次回開催: {nextDate:yyyy-MM-dd} 場={trackCode} {races.Count}レースを診断用に送信しました。");
+                }
+                System.IO.File.WriteAllText(stamp, sent > 0 ? "done" : "notfound");
+            }
+            catch (Exception ex)
+            {
+                // 今日の更新を止めない。失敗が続いても毎周期は試さず、一定時間あけて再試行する。
+                try { System.IO.File.WriteAllText(stamp, "notfound"); } catch { /* 記録できなくても続行 */ }
+                LogFailure(source.SourceName, "次回開催の診断用データの作成に失敗（今日の更新には影響しません）", ex);
             }
         }
 

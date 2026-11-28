@@ -84,7 +84,7 @@ function keiba_diag_material_value($candidate, $material)
 }
 
 /** 質問Q1（スタイル）とQ2（人気層）を満たす候補馬か。$use_popularityがfalseならQ2を無視する。 */
-function keiba_diag_candidate_matches($candidate, $style, $popularity, $use_popularity)
+function keiba_diag_candidate_matches($candidate, $style, $popularity, $use_popularity, $preview = false)
 {
     $ninki = isset($candidate['ninki']) && is_numeric($candidate['ninki']) ? (int) $candidate['ninki'] : null;
     $odds = isset($candidate['tanshoOdds']) && is_numeric($candidate['tanshoOdds']) ? (float) $candidate['tanshoOdds'] : null;
@@ -94,6 +94,10 @@ function keiba_diag_candidate_matches($candidate, $style, $popularity, $use_popu
     // ただし「AIの総合評価を重視」で、人気層の指定が無い（または人気の条件を外した）場合は、
     // 人気を使わないので、AI指数だけで判定できる。
     if ($ninki === null) {
+        // 次回開催（発売前）の診断は、人気がまだ無いので人気では絞らず、AI指数と要素別評価で選ぶ。
+        if ($preview) {
+            return true;
+        }
         return $style === 'ai' && (!$use_popularity || $popularity === 'any');
     }
 
@@ -135,7 +139,7 @@ function keiba_diag_candidate_matches($candidate, $style, $popularity, $use_popu
  * 1レースの診断スコア。条件に合う候補馬のうち最も高い値を返す。合う馬が無ければnull。
  * スコア = 重視する予想材料の評価 と AI指数 の平均（材料が「AI総合指数」ならAI指数そのもの）。
  */
-function keiba_diag_score_race($race, $answers, $use_popularity)
+function keiba_diag_score_race($race, $answers, $use_popularity, $preview = false)
 {
     $best = null;
     $candidates = isset($race['candidates']) && is_array($race['candidates']) ? $race['candidates'] : array();
@@ -143,7 +147,7 @@ function keiba_diag_score_race($race, $answers, $use_popularity)
         if (!isset($candidate['aiIndex']) || !is_numeric($candidate['aiIndex'])) {
             continue; // AI指数が取得できない馬は推薦しない。
         }
-        if (!keiba_diag_candidate_matches($candidate, $answers['s'], $answers['p'], $use_popularity)) {
+        if (!keiba_diag_candidate_matches($candidate, $answers['s'], $answers['p'], $use_popularity, $preview)) {
             continue;
         }
         $material = keiba_diag_material_value($candidate, $answers['m']);
@@ -199,7 +203,7 @@ function keiba_diag_type_label($answers)
 }
 
 /** 選定理由。すべて実データから作る（根拠のない文は出さない）。 */
-function keiba_diag_reasons($race, $best, $answers)
+function keiba_diag_reasons($race, $best, $answers, $preview = false)
 {
     $reasons = array();
     $candidate = $best['candidate'];
@@ -226,7 +230,11 @@ function keiba_diag_reasons($race, $best, $answers)
         $reasons[] = $material_messages[$answers['m']] . '（' . number_format($best['material'], 1) . '）';
     }
 
-    $reasons[] = '回答した予想スタイル（' . keiba_diag_style_label($answers['s']) . '・' . keiba_diag_material_label($answers['m']) . '）と相性が良い';
+    if ($preview) {
+        $reasons[] = '発売前のため人気は未確定です。出馬表とAI指数・要素別評価から選んでいます';
+    } else {
+        $reasons[] = '回答した予想スタイル（' . keiba_diag_style_label($answers['s']) . '・' . keiba_diag_material_label($answers['m']) . '）と相性が良い';
+    }
     return array_slice($reasons, 0, 4);
 }
 
@@ -241,7 +249,7 @@ function keiba_diag_reasons($race, $best, $answers)
  * 診断の対象になるレース（中央/地方の条件に合い、発走時刻が分かっていて、まだ発走していない）。
  * $course は central / local / both。ばんえい競馬は診断の対象外。
  */
-function keiba_diag_eligible_races($races, $course, $now_hhmm)
+function keiba_diag_eligible_races($races, $course, $now_hhmm, $preview = false)
 {
     $eligible = array();
     foreach ($races as $race) {
@@ -254,7 +262,8 @@ function keiba_diag_eligible_races($races, $course, $now_hhmm)
         if ($race['trackCode'] === '83') {
             continue; // ばんえい競馬は診断の対象外。
         }
-        if (empty($race['startTime']) || $race['startTime'] <= $now_hhmm) {
+        // 次回開催（まだ当日になっていない）のレースは、発走時刻で絞らない。
+        if (!$preview && (empty($race['startTime']) || $race['startTime'] <= $now_hhmm)) {
             continue; // 発走時刻が不明、または発走済み。
         }
         $eligible[] = $race;
@@ -262,15 +271,15 @@ function keiba_diag_eligible_races($races, $course, $now_hhmm)
     return $eligible;
 }
 
-function keiba_diag_select($races, $answers, $now_hhmm, $limit = 3)
+function keiba_diag_select($races, $answers, $now_hhmm, $limit = 3, $preview = false)
 {
-    $eligible = keiba_diag_eligible_races($races, $answers['c'], $now_hhmm);
+    $eligible = keiba_diag_eligible_races($races, $answers['c'], $now_hhmm, $preview);
 
     $relaxed = false;
-    $scored = keiba_diag_score_all($eligible, $answers, true);
+    $scored = keiba_diag_score_all($eligible, $answers, true, $preview);
     if (!$scored) {
         // 人気の条件まで合うレースが無いときは、人気の条件を外して選び直し、その旨を表示する。
-        $scored = keiba_diag_score_all($eligible, $answers, false);
+        $scored = keiba_diag_score_all($eligible, $answers, false, $preview);
         $relaxed = (bool) $scored;
     }
 
@@ -293,11 +302,11 @@ function keiba_diag_select($races, $answers, $now_hhmm, $limit = 3)
     return array('items' => $items, 'relaxed' => $relaxed);
 }
 
-function keiba_diag_score_all($eligible, $answers, $use_popularity)
+function keiba_diag_score_all($eligible, $answers, $use_popularity, $preview = false)
 {
     $scored = array();
     foreach ($eligible as $race) {
-        $best = keiba_diag_score_race($race, $answers, $use_popularity);
+        $best = keiba_diag_score_race($race, $answers, $use_popularity, $preview);
         if ($best === null || keiba_diag_rank($best['score']) === null) {
             continue; // 基準（偏差値50）に届かないレースは推薦しない。
         }
@@ -306,12 +315,69 @@ function keiba_diag_score_all($eligible, $answers, $use_popularity)
     return $scored;
 }
 
+/** "2026-11-29" → "11月29日(日)"。 */
+function keiba_diag_date_label($ymd)
+{
+    $ts = strtotime($ymd . ' 12:00:00 UTC');
+    if ($ts === false) {
+        return '';
+    }
+    $weekdays = array('日', '月', '火', '水', '木', '金', '土');
+    return (int) gmdate('n', $ts) . '月' . (int) gmdate('j', $ts) . '日(' . $weekdays[(int) gmdate('w', $ts)] . ')';
+}
+
+/**
+ * 次回開催のレース。$previews は date（Y-m-d）付きのレースの配列（keiba_diag_load_previewの結果）。
+ * $today より後の日付のうち、$course（central / local / both）の最も近い開催日のレースを返す。無ければnull。
+ *
+ * @return array|null array('date' => 'Y-m-d', 'races' => レース, 'venues' => 開催場名)
+ */
+function keiba_diag_next_meeting($previews, $course, $today)
+{
+    $best_date = null;
+    foreach ($previews as $race) {
+        if ($race['trackCode'] === '83' || $race['date'] <= $today) {
+            continue;
+        }
+        if ($course === 'central' && !keiba_diag_is_central($race['trackCode'])) {
+            continue;
+        }
+        if ($course === 'local' && keiba_diag_is_central($race['trackCode'])) {
+            continue;
+        }
+        if ($best_date === null || $race['date'] < $best_date) {
+            $best_date = $race['date'];
+        }
+    }
+    if ($best_date === null) {
+        return null;
+    }
+    $races = array();
+    $venues = array();
+    foreach ($previews as $race) {
+        if ($race['date'] !== $best_date || $race['trackCode'] === '83') {
+            continue;
+        }
+        if ($course === 'central' && !keiba_diag_is_central($race['trackCode'])) {
+            continue;
+        }
+        if ($course === 'local' && keiba_diag_is_central($race['trackCode'])) {
+            continue;
+        }
+        $races[] = $race;
+        if ($race['venue'] !== '' && !in_array($race['venue'], $venues, true)) {
+            $venues[] = $race['venue'];
+        }
+    }
+    return array('date' => $best_date, 'races' => $races, 'venues' => $venues);
+}
+
 /**
  * 本日の開催状況（選択画面に表示する）。state は
  *   open=診断できるレースあり / ended=本日の開催は終了 / none=本日の開催なし / preparing=データ準備中
  * remaining は診断できる（まだ発走していない）レース数。
  */
-function keiba_diag_status($loaded, $now_hhmm)
+function keiba_diag_status($loaded, $now_hhmm, $previews = array(), $today = '')
 {
     $out = array();
     $total = 0;
@@ -327,11 +393,21 @@ function keiba_diag_status($loaded, $now_hhmm)
         } else {
             $state = 'ended';
         }
-        $out[$course] = array('state' => $state, 'remaining' => $remaining);
+        $out[$course] = array('state' => $state, 'remaining' => $remaining, 'next' => keiba_diag_next_summary($previews, $course, $today));
         $total += $remaining;
     }
-    $out['both'] = array('remaining' => $total);
+    $out['both'] = array('remaining' => $total, 'next' => keiba_diag_next_summary($previews, 'both', $today));
     return $out;
+}
+
+/** 選択画面に出す次回開催の要約（開催日の表記と診断できるレース数）。無ければnull。 */
+function keiba_diag_next_summary($previews, $course, $today)
+{
+    $next = keiba_diag_next_meeting($previews, $course, $today);
+    if ($next === null) {
+        return null;
+    }
+    return array('date' => $next['date'], 'label' => keiba_diag_date_label($next['date']), 'races' => count($next['races']));
 }
 
 /**
@@ -451,6 +527,7 @@ function keiba_diag_events()
         'view', 'start', 'complete', 'detail_click', 'line_click', 'detail_view',
         // 通常の診断結果と代替診断結果を区別するためのイベント（表示数・LINEボタンのクリック数）。
         'result_normal', 'result_fallback', 'line_click_normal', 'line_click_fallback',
+        'result_next', 'line_click_next', // 次回開催の診断結果（通常の結果の内数）
         'recheck',
     );
 }
@@ -620,7 +697,93 @@ function keiba_diag_load_races()
     return array('races' => $races, 'prepared' => $has_races_meta, 'groups' => $groups);
 }
 
+define('KEIBA_DIAG_PREVIEW_OPTION', 'keiba_diag_preview');
+define('KEIBA_DIAG_PREVIEW_MAX_AGE', 36 * 3600);
+
+/** 日本時間の今日（Y-m-d）。 */
+function keiba_diag_today()
+{
+    return (new DateTimeImmutable('now', new DateTimeZone('Asia/Tokyo')))->format('Y-m-d');
+}
+
+/**
+ * 収集アプリが送った次回開催のレース（診断専用。記事は作られない）を、今日より後の分だけ集める。
+ * 更新が古いもの（収集の停止など）は使わない。
+ */
+function keiba_diag_load_preview()
+{
+    $today = keiba_diag_today();
+    $stored = get_option(KEIBA_DIAG_PREVIEW_OPTION, array());
+    $out = array();
+    if (!is_array($stored)) {
+        return $out;
+    }
+    foreach ($stored as $entry) {
+        if (!is_array($entry) || empty($entry['raceDate']) || $entry['raceDate'] <= $today) {
+            continue;
+        }
+        if (time() - (int) ($entry['updatedAt'] ?? 0) > KEIBA_DIAG_PREVIEW_MAX_AGE) {
+            continue;
+        }
+        foreach ((array) ($entry['races'] ?? array()) as $race) {
+            if (!is_array($race) || empty($race['candidates'])) {
+                continue;
+            }
+            $out[] = array(
+                'date' => (string) $entry['raceDate'],
+                'trackCode' => (string) $entry['trackCode'],
+                'venue' => (string) ($entry['venue'] ?? ''),
+                'link' => '',
+                'raceNumber' => (int) ($race['raceNumber'] ?? 0),
+                'raceName' => (string) ($race['raceName'] ?? ''),
+                'startTime' => (string) ($race['startTime'] ?? ''),
+                'candidates' => $race['candidates'],
+            );
+        }
+    }
+    return $out;
+}
+
+/** 収集アプリからの次回開催データの受け取り（edit_posts権限＝Application Passwordで認証）。 */
+function keiba_diag_rest_preview_save(WP_REST_Request $request)
+{
+    $body = $request->get_json_params();
+    $date = is_array($body) ? (string) ($body['raceDate'] ?? '') : '';
+    $track = is_array($body) ? (string) ($body['trackCode'] ?? '') : '';
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) || !preg_match('/^\d{2}$/', $track) || !is_array($body['races'] ?? null)) {
+        return new WP_Error('invalid_body', 'raceDate, trackCode, races are required', array('status' => 400));
+    }
+
+    $today = keiba_diag_today();
+    $stored = get_option(KEIBA_DIAG_PREVIEW_OPTION, array());
+    $stored = is_array($stored) ? $stored : array();
+    // 今日以前の分と、古くなった分は捨てる（今日になれば通常のダイジェストが使われる）。
+    foreach ($stored as $key => $entry) {
+        if (!is_array($entry) || ($entry['raceDate'] ?? '') <= $today || time() - (int) ($entry['updatedAt'] ?? 0) > KEIBA_DIAG_PREVIEW_MAX_AGE) {
+            unset($stored[$key]);
+        }
+    }
+    if ($date > $today) {
+        $stored[$date . '|' . $track] = array(
+            'raceDate' => $date,
+            'trackCode' => $track,
+            'venue' => sanitize_text_field((string) ($body['venue'] ?? '')),
+            'races' => array_slice($body['races'], 0, 20),
+            'updatedAt' => time(),
+        );
+    }
+    update_option(KEIBA_DIAG_PREVIEW_OPTION, $stored, false);
+    return array('ok' => true, 'stored' => count($stored));
+}
+
 add_action('rest_api_init', function () {
+    register_rest_route('keiba-ai/v1', '/diagnosis-preview', array(
+        'methods' => 'POST',
+        'permission_callback' => function () {
+            return current_user_can('edit_posts');
+        },
+        'callback' => 'keiba_diag_rest_preview_save',
+    ));
     register_rest_route('keiba-ai/v1', '/diagnosis', array(
         'methods' => 'GET',
         'permission_callback' => '__return_true',
@@ -646,7 +809,7 @@ function keiba_diag_is_unlocked()
 function keiba_diag_rest_status()
 {
     $now_hhmm = (new DateTimeImmutable('now', new DateTimeZone('Asia/Tokyo')))->format('H:i');
-    $response = new WP_REST_Response(keiba_diag_status(keiba_diag_load_races(), $now_hhmm));
+    $response = new WP_REST_Response(keiba_diag_status(keiba_diag_load_races(), $now_hhmm, keiba_diag_load_preview(), keiba_diag_today()));
     $response->header('Cache-Control', 'no-store');
     return $response;
 }
@@ -682,17 +845,47 @@ function keiba_diag_rest_diagnosis(WP_REST_Request $request)
         return $response;
     };
 
+    // 今日診断できるレースが無いときは、次回開催のレースを診断対象にする。次回開催のデータも無ければ代替診断。
+    $to_next = function () use (&$response, $answers, $to_fallback) {
+        $next = keiba_diag_next_meeting(keiba_diag_load_preview(), $answers['c'], keiba_diag_today());
+        if ($next === null) {
+            return null;
+        }
+        $selected = keiba_diag_select($next['races'], $answers, '00:00', 3, true);
+        if (!$selected['items']) {
+            return null;
+        }
+        $response['status'] = 'next';
+        $response['preview'] = true;
+        $response['meeting'] = array(
+            'date' => $next['date'],
+            'label' => keiba_diag_date_label($next['date']),
+            'venues' => $next['venues'],
+        );
+        $response['relaxed'] = $selected['relaxed'];
+        return $selected;
+    };
+
+    $selected = null;
+    $preview = false;
     if (!$loaded['prepared']) {
-        // 本日の開催があるのにデータが無いときだけ「準備中」。開催そのものが無い日は「なし」。
+        // 本日の開催があるのにデータが無いときだけ「準備中」。開催そのものが無い日は次回開催へ。
         $any_opened = $loaded['groups']['central']['opened'] || $loaded['groups']['local']['opened'];
-        return $to_fallback($any_opened ? 'preparing' : 'none');
+        if ($any_opened) {
+            return $to_fallback('preparing');
+        }
+    } else {
+        $now_hhmm = (new DateTimeImmutable('now', new DateTimeZone('Asia/Tokyo')))->format('H:i');
+        $selected = keiba_diag_select($loaded['races'], $answers, $now_hhmm, 3);
+        $response['relaxed'] = $selected['relaxed'];
     }
 
-    $now_hhmm = (new DateTimeImmutable('now', new DateTimeZone('Asia/Tokyo')))->format('H:i');
-    $selected = keiba_diag_select($loaded['races'], $answers, $now_hhmm, 3);
-    $response['relaxed'] = $selected['relaxed'];
-    if (!$selected['items']) {
-        return $to_fallback('none');
+    if (!$selected || !$selected['items']) {
+        $selected = $to_next();
+        if ($selected === null) {
+            return $to_fallback('none');
+        }
+        $preview = true;
     }
 
     foreach ($selected['items'] as $row) {
@@ -703,7 +896,7 @@ function keiba_diag_rest_diagnosis(WP_REST_Request $request)
             'raceName' => $race['raceName'],
             'startTime' => $race['startTime'],
             'rank' => $row['rank'],
-            'reasons' => keiba_diag_reasons($race, $row['best'], $answers),
+            'reasons' => keiba_diag_reasons($race, $row['best'], $answers, $preview),
             'link' => $race['link'],
             'detail' => null,
         );
@@ -806,7 +999,7 @@ function keiba_ai_digest_render_diagnosis_admin()
 
     echo '<table class="widefat striped" style="max-width:860px"><thead><tr>'
         . '<th>流入元</th><th>アクセス</th><th>診断開始</th><th>診断完了</th><th>完了率</th><th>詳細を見る</th><th>LINEボタン</th><th>LINEクリック率</th>'
-        . '<th>通常結果の表示</th><th>代替結果の表示</th><th>LINE（通常）</th><th>LINE（代替）</th><th>再診断</th>'
+        . '<th>通常結果の表示</th><th>代替結果の表示</th><th>LINE（通常）</th><th>LINE（代替）</th><th>再診断</th><th>次回開催の表示</th><th>LINE（次回開催）</th>'
         . '</tr></thead><tbody>';
     $print_row = function ($label, $by_event) {
         $view = isset($by_event['view']) ? $by_event['view'] : 0;
@@ -818,7 +1011,7 @@ function keiba_ai_digest_render_diagnosis_admin()
             . '<td>' . ($start > 0 ? round($complete / $start * 100, 1) . '%' : '-') . '</td>'
             . '<td>' . (int) $detail . '</td><td>' . (int) $line . '</td>'
             . '<td>' . ($complete > 0 ? round($line / $complete * 100, 1) . '%' : '-') . '</td>';
-        foreach (array('result_normal', 'result_fallback', 'line_click_normal', 'line_click_fallback', 'recheck') as $extra) {
+        foreach (array('result_normal', 'result_fallback', 'line_click_normal', 'line_click_fallback', 'recheck', 'result_next', 'line_click_next') as $extra) {
             echo '<td>' . (int) (isset($by_event[$extra]) ? $by_event[$extra] : 0) . '</td>';
         }
         echo '</tr>';
@@ -833,5 +1026,6 @@ function keiba_ai_digest_render_diagnosis_admin()
     echo '<p class="description">「LINEボタン」は友だち追加ボタンのクリック数で、実際の友だち追加数とは別の数値です。'
         . 'GA4には diagnosis_view / diagnosis_start / diagnosis_complete / diagnosis_detail_click / diagnosis_line_click に加えて、'
         . '通常の診断結果と代替診断結果を区別する diagnosis_result_normal / diagnosis_result_fallback（表示数）、'
-        . 'diagnosis_line_click_normal / diagnosis_line_click_fallback（LINEボタンのクリック数）、diagnosis_recheck（再診断）を送信しています。</p>';
+        . 'diagnosis_line_click_normal / diagnosis_line_click_fallback（LINEボタンのクリック数）、diagnosis_recheck（再診断）を送信しています。'
+        . '次回開催のレースを診断した場合は、通常の結果として数えたうえで、diagnosis_result_next / diagnosis_line_click_next も送信します。</p>';
 }

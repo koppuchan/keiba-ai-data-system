@@ -37,6 +37,9 @@
   - 診断できるレースが無いとき（開催のない日、全レース終了後、データ準備中）は「該当なし」にせず、
     回答から決まった文面で作る代替診断（競馬スタイル）を表示する（`status=fallback`）。回答を引き継いだまま
     中央・地方を変えて再診断でき、代替診断にもLINE登録ボタンを置く
+  - 今日診断できるレースが無いときは、次回開催のレースを診断対象にする（`status=next`）。収集アプリが
+    `POST /wp-json/keiba-ai/v1/diagnosis-preview`（edit_posts権限）で送る次回開催の候補馬・AI指数・要素別評価を使う
+    （記事は作らない。発売前で人気が無いので、人気では絞らずAI指数と要素別評価で選ぶ。36時間更新が無ければ使わない）
   - 中央・地方の選択画面に、本日の開催有無と診断できるレース数を表示する（`/wp-json/keiba-ai/v1/diagnosis-status`）
   - GA4: 既存の `diagnosis_*` に加え、`diagnosis_result_normal` / `diagnosis_result_fallback`（表示数）、
     `diagnosis_line_click_normal` / `diagnosis_line_click_fallback`（LINEボタンのクリック数）、`diagnosis_recheck` を送信
