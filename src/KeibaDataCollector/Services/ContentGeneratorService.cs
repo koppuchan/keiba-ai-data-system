@@ -62,6 +62,9 @@ namespace KeibaDataCollector.Services
             return DateTime.Now.TimeOfDay >= start + TimeSpan.FromMinutes(3);
         }
 
+        /// <summary>falseなら単勝オッズ・人気を取りに行かない（次回開催の診断用データ。発売前で取れないため）。</summary>
+        public bool FetchOdds { get; set; } = true;
+
         /// <summary>直近のGenerateForVenueで作ったレース要約（診断用の公開データ）。</summary>
         public List<RaceSummary> LastRaceSummaries { get; private set; } = new List<RaceSummary>();
 
@@ -170,7 +173,7 @@ namespace KeibaDataCollector.Services
             var started = HasStarted(raceDate, raceInfo.StartTime);
             if (started && _cache != null)
                 odds = _cache.GetOdds(raceDate, trackCode, raceNumber); // 発走後はもう変わらない。取り直さない。
-            if (odds == null)
+            if (odds == null && FetchOdds)
             {
                 var oddsTimer = System.Diagnostics.Stopwatch.StartNew();
                 odds = RealtimeOddsFetcher.FetchTansho(_source, raceKey, out _);

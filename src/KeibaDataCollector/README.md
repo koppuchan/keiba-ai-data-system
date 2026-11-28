@@ -132,6 +132,13 @@ powershell -ExecutionPolicy Bypass -File .\register-scheduled-tasks.ps1
 `register-scheduled-tasks.ps1` は、以前の `Score` / `TrendMorning` / `TrendLive` / `Content` / `TrendFinal` タスクが
 残っていれば（このシステムの名前のものだけ）削除する。`score` / `content` / `trend` コマンド自体は、手動の再実行用に残している。
 
+**次回開催（診断用）**: `cycle` の最後に、今日より後の最も近い開催日（今週データに出馬表が出ているもの）の
+AI指数と候補馬を、診断専用のデータとして WordPress へ送る（`POST /wp-json/keiba-ai/v1/diagnosis-preview`）。
+通常のダイジェスト記事は作らず、予想の記録（predictions）にも残さない。人気・オッズは発売前で取れないので使わない。
+LicenseGate と自動公開ON/OFFは通常の公開と同じ条件で守る。3時間に1回（開催日が見つからないときは1時間に1回）、
+周期の経過が12分未満のときだけ実行し、失敗しても今日の更新は止めない。間隔の管理は `data` フォルダの
+`preview-<ソース名>.stamp`（消すと次の周期で作り直す）。出馬表は中央なら木〜金曜に馬番が確定してから使える。
+
 「前日夜: 翌日開催場・出走予定を準備」（仕様書§12）に対応する専用タスクは意図的に作っていない
 （`morning`は当日分を早朝に取得すれば間に合う設計のため。詳細はスクリプト冒頭のコメント参照）。
 

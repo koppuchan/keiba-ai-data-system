@@ -344,6 +344,44 @@ namespace KeibaDataCollector.WordPress
             return true;
         }
 
+        /// <summary>次回開催の診断用データ（レースごとの候補馬・AI指数・要素別評価）を送る。記事（ダイジェスト）は
+        /// 作らず、診断だけが使う。当日になれば通常のダイジェストが使われ、この分は参照されなくなる。</summary>
+        public async Task UpsertDiagnosisPreviewAsync(DateTime raceDate, string trackCode, List<RaceSummary> races)
+        {
+            var body = JsonConvert.SerializeObject(new
+            {
+                raceDate = raceDate.ToString("yyyy-MM-dd"),
+                trackCode,
+                venue = VenueNames.Get(trackCode),
+                races,
+            }, CamelCaseSettings);
+
+            for (int attempt = 1; ; attempt++)
+            {
+                var content = new StringContent(body, Encoding.UTF8, "application/json");
+                HttpResponseMessage response;
+                try
+                {
+                    response = await _http.PostAsync($"{_baseUrl}/wp-json/keiba-ai/v1/diagnosis-preview", content);
+                }
+                catch (HttpRequestException) when (attempt < SendMaxAttempts)
+                {
+                    await Task.Delay(SendRetryDelay);
+                    continue;
+                }
+
+                if (response.IsSuccessStatusCode) return;
+
+                var respBody = await response.Content.ReadAsStringAsync();
+                if (IsTransientHttpStatus(response.StatusCode) && attempt < SendMaxAttempts)
+                {
+                    await Task.Delay(SendRetryDelay);
+                    continue;
+                }
+                throw new InvalidOperationException($"WordPress diagnosis-preview API failed ({response.StatusCode}): {respBody}");
+            }
+        }
+
         private async Task<int?> FindDigestPostIdAsync(string digestKey)
         {
             var url = $"{_baseUrl}/wp-json/wp/v2/keiba_digest?meta_key=digest_key&meta_value={digestKey}";

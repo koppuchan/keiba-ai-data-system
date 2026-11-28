@@ -105,25 +105,36 @@
         return statusPromise;
     }
 
+    function nextText(info) {
+        return info && info.next
+            ? '次回開催 ' + info.next.label + '・診断できるレース ' + info.next.races + 'レース'
+            : '';
+    }
+
     function statusText(info, isBoth) {
         if (!info) {
             return '';
         }
+        var next = nextText(info);
         if (isBoth) {
-            return info.remaining > 0
-                ? '本日診断できるレース ' + info.remaining + 'レース'
-                : '本日はこれから診断できるレースがありません（あなたに合ったスタイルをご案内します）';
+            if (info.remaining > 0) {
+                return '本日診断できるレース ' + info.remaining + 'レース';
+            }
+            return next || '本日はこれから診断できるレースがありません（あなたに合ったスタイルをご案内します）';
         }
+        var today;
         switch (info.state) {
             case 'open':
                 return '本日開催中・診断できるレース ' + info.remaining + 'レース';
             case 'ended':
-                return '本日の開催は終了しました';
+                today = '本日の開催は終了しました';
+                break;
             case 'preparing':
                 return '本日のデータを準備中です';
             default:
-                return '本日の開催はありません';
+                today = '本日の開催はありません';
         }
+        return next ? today + '／' + next : today;
     }
 
     /* ---------------------------------------------------------------- 描画の補助 */
@@ -290,7 +301,14 @@
                 }
                 save(answers);
                 if (!restored) {
-                    track(data.status === 'fallback' ? 'result_fallback' : 'result_normal');
+                    if (data.status === 'fallback') {
+                        track('result_fallback');
+                    } else {
+                        track('result_normal');
+                        if (data.status === 'next') {
+                            track('result_next'); // 次回開催のレースを診断した結果（通常の結果の内数）
+                        }
+                    }
                 }
                 if (data.status === 'fallback') {
                     showFallback(data);
@@ -314,7 +332,10 @@
         a.rel = 'noopener';
         a.addEventListener('click', function () {
             track('line_click');
-            track('line_click_' + kind);
+            track('line_click_' + (kind === 'next' ? 'normal' : kind));
+            if (kind === 'next') {
+                track('line_click_next');
+            }
         });
         return a;
     }
@@ -387,10 +408,17 @@
     function showResult(data) {
         clear();
         var wrap = el('div', 'kdg-result');
+        var isNext = data.status === 'next' && data.meeting;
+        var resultKind = isNext ? 'next' : 'normal';
 
         var head = el('div', 'kdg-card kdg-result-head');
         head.appendChild(el('p', 'kdg-catch', 'あなたの診断タイプ'));
         head.appendChild(el('h2', 'kdg-type', '「' + data.type + '」'));
+        if (isNext) {
+            var meetingText = data.meeting.label + (data.meeting.venues && data.meeting.venues.length ? ' ' + data.meeting.venues.join('・') : '');
+            head.appendChild(el('p', 'kdg-note kdg-note-first', '本日これから診断できるレースがないため、次回開催（' + meetingText + '）のレースからお選びしています。'));
+            head.appendChild(el('p', 'kdg-note', '発売前のため人気はまだ決まっていません。出馬表とAI指数・要素別評価をもとにしています。'));
+        }
         if (data.relaxed) {
             head.appendChild(el('p', 'kdg-note', '人気の条件に合うレースがなかったため、人気の条件を外してお選びしています。'));
         }
@@ -400,7 +428,7 @@
         var details = [];
         data.items.forEach(function (item, index) {
             var card = el('div', 'kdg-card kdg-race' + (index === 0 ? ' kdg-race-main' : ''));
-            card.appendChild(el('p', 'kdg-catch', index === 0 ? 'あなたに合ったレース' : '他の注目レース'));
+            card.appendChild(el('p', 'kdg-catch', index === 0 ? (isNext ? 'あなたに合った次回開催のレース' : 'あなたに合ったレース') : '他の注目レース'));
 
             var title = el('h3', 'kdg-race-title');
             title.appendChild(document.createTextNode(item.venue + ' ' + item.raceNumber + 'R'));
@@ -409,7 +437,7 @@
             var meta = el('p', 'kdg-race-meta');
             var rank = el('span', 'kdg-rank kdg-rank-' + item.rank, '注目度 ' + item.rank);
             meta.appendChild(rank);
-            meta.appendChild(document.createTextNode(' 発走 ' + item.startTime + (item.raceName ? '　' + item.raceName : '')));
+            meta.appendChild(document.createTextNode((item.startTime ? ' 発走 ' + item.startTime : '') + (item.raceName ? '　' + item.raceName : '')));
             card.appendChild(meta);
 
             card.appendChild(el('p', 'kdg-reason-title', 'このレースを選んだ理由'));
@@ -424,7 +452,9 @@
             card.appendChild(detail);
             details.push({ node: detail, item: item });
 
-            card.appendChild(el('a', 'kdg-link', 'この開催場の無料予想（AI指数ダイジェスト）を見る →')).setAttribute('href', item.link);
+            if (item.link) {
+                card.appendChild(el('a', 'kdg-link', 'この開催場の無料予想（AI指数ダイジェスト）を見る →')).setAttribute('href', item.link);
+            }
             wrap.appendChild(card);
         });
 
@@ -467,14 +497,14 @@
             track('detail_view');
             renderDetails();
             cta.appendChild(el('p', 'kdg-cta-title', '詳細をご覧いただけます'));
-            var more = friendAddButton('LINE友だち追加がまだの方はこちら（無料）', 'kdg-btn kdg-btn-line', 'normal');
+            var more = friendAddButton('LINE友だち追加がまだの方はこちら（無料）', 'kdg-btn kdg-btn-line', resultKind);
             if (more) {
                 cta.appendChild(more);
             }
         } else {
-            cta.appendChild(el('p', 'kdg-cta-title', 'あなた向けの注目馬・AI指数を無料公開中！'));
+            cta.appendChild(el('p', 'kdg-cta-title', isNext ? '次回開催のあなた向けの注目馬・AI指数を無料公開中！' : 'あなた向けの注目馬・AI指数を無料公開中！'));
             cta.appendChild(el('p', 'kdg-lead', '本命馬・注目穴馬・危険な人気馬・AI指数などの詳細は、LINE登録後にご覧いただけます。'));
-            var line = friendAddButton('LINE登録で診断結果の詳細をチェック', 'kdg-btn kdg-btn-line', 'normal');
+            var line = friendAddButton('LINE登録で診断結果の詳細をチェック', 'kdg-btn kdg-btn-line', resultKind);
             var open = button('本命馬・穴馬・AI指数などの詳細を見る', 'kdg-btn kdg-btn-primary', function () {
                 track('detail_click');
                 open.hidden = true;

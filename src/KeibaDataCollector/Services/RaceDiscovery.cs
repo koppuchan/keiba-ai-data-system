@@ -80,5 +80,65 @@ namespace KeibaDataCollector.Services
 
             return keys;
         }
+
+        /// <summary>指定日より後で、最も近い開催日とその開催場コードを返す。無ければnull。
+        /// 診断の「次回開催」用。出馬表は開催日より前に公開されるので、今週・当日データ(option=2)に
+        /// 含まれる次の開催日を探す（来週分がまだ公開されていなければ見つからない）。</summary>
+        public static (DateTime Date, List<string> TrackCodes)? NextRaceDay(IRaceDataSource source, DateTime after)
+        {
+            var open = source.Open("RACE", EarlyAnchorFromTime, DataOption.ThisWeekAndToday);
+            if (open.ReturnCode == -1)
+            {
+                source.Close();
+                return null;
+            }
+            if (open.ReturnCode < 0)
+            {
+                source.Close();
+                throw new InvalidOperationException($"{source.SourceName} Open failed: {open.ReturnCode}");
+            }
+
+            var tracksByDate = new SortedDictionary<DateTime, HashSet<string>>();
+            var download = new DownloadWait(TimeSpan.FromSeconds(180));
+            try
+            {
+                while (true)
+                {
+                    int size = source.Read(out var buffer, out _);
+                    if (size == 0) break;
+                    if (size == -1) continue;
+                    if (size == -3) { download.Wait(); continue; }
+                    download.Reset();
+                    if (size < 0)
+                        throw new InvalidOperationException($"{source.SourceName} Read failed: {size}");
+
+                    if (JvRecordParser.GetRecordTypeId(buffer) != "RA") continue;
+
+                    RaceKey raceKey;
+                    try
+                    {
+                        (raceKey, _) = JvRecordParser.ParseCornerPassage(buffer);
+                    }
+                    catch (Exception)
+                    {
+                        continue;
+                    }
+
+                    var date = raceKey.RaceDate.Date;
+                    if (date <= after.Date) continue;
+                    if (!tracksByDate.TryGetValue(date, out var set))
+                        tracksByDate[date] = set = new HashSet<string>();
+                    set.Add(raceKey.TrackCode);
+                }
+            }
+            finally
+            {
+                source.Close();
+            }
+
+            foreach (var kv in tracksByDate)
+                return (kv.Key, new List<string>(kv.Value));
+            return null;
+        }
     }
 }
